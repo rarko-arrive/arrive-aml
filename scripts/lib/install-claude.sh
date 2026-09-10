@@ -1,59 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install Claude CLI
-# Requires Node.js/npm
+# Check for Claude Code CLI
+# Note: Claude Code is typically pre-installed on Azure ML VMs
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
 source "$SCRIPT_DIR/common.sh"
 
-install_node_if_needed() {
-  if command -v node >/dev/null 2>&1; then
-    log_success "Node.js already installed: $(node --version)"
-    return 0
-  fi
-
-  log_info "Node.js not found. Installing Node.js via NodeSource..."
-
-  if ! is_ubuntu; then
-    log_error "Auto-install only supported on Ubuntu. Install Node.js manually."
-    return 1
-  fi
-
-  # Install Node.js 20.x LTS
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt-get install -y -qq nodejs
-
-  log_success "Node.js installed: $(node --version)"
-}
-
 install_claude() {
-  log_info "Installing Claude CLI..."
+  log_info "Checking for Claude Code..."
 
-  # Ensure Node.js is installed
-  install_node_if_needed || return 1
-
-  # Check if claude is already installed
+  # Check if claude is already installed (Claude Code)
   if command -v claude >/dev/null 2>&1; then
-    log_success "Claude CLI already installed: $(claude --version)"
+    local version=$(claude --version 2>/dev/null || echo "installed")
+    log_success "Claude Code already installed: $version"
     return 0
   fi
 
-  log_info "Installing Claude CLI via npm..."
-  sudo npm install -g @anthropic-ai/claude-cli
-
-  if ! command -v claude >/dev/null 2>&1; then
-    log_error "Claude CLI installation failed"
-    return 1
-  fi
-
-  log_success "Claude CLI installed successfully!"
-  log_info "Version: $(claude --version)"
+  log_warn "Claude Code not found"
+  log_info "Claude Code is the official CLI from Anthropic"
+  log_info "It's typically pre-installed on Azure ML VMs"
   echo
-  log_info "Next steps:"
-  log_info "  1. Get API key from: https://console.anthropic.com/settings/keys"
-  log_info "  2. Configure: claude configure"
+  log_info "If you need to install it manually:"
+  echo
+  echo "  Option 1 - Install via curl (Linux/macOS):"
+  echo "    curl -fsSL https://claude.ai/install.sh | sh"
+  echo
+  echo "  Option 2 - Download from official site:"
+  echo "    Visit: https://claude.ai/download"
+  echo
+  echo "  Option 3 - Check if already available:"
+  echo "    which claude"
+  echo "    \$HOME/.local/bin/claude --version"
+  echo
+  log_info "After installation, authenticate with:"
+  log_info "  claude auth login"
+
+  # Return success (non-critical tool)
+  return 0
 }
 
 # Run if executed directly (not sourced)

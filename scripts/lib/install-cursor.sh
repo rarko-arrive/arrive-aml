@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Install Cursor Editor
+# Install Cursor Editor (optional)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
@@ -22,9 +22,18 @@ install_cursor() {
   mkdir -p "${HOME}/.local/bin"
   mkdir -p "$CURSOR_DIR"
 
-  # Download latest Cursor AppImage
+  # Download latest Cursor AppImage with timeout
   local DOWNLOAD_URL="https://downloader.cursor.sh/linux/appImage/x64"
-  wget -q --show-progress "$DOWNLOAD_URL" -O "${CURSOR_DIR}/cursor.AppImage"
+
+  log_info "Attempting download from: $DOWNLOAD_URL"
+  if ! wget --timeout=60 --tries=2 -q --show-progress "$DOWNLOAD_URL" -O "${CURSOR_DIR}/cursor.AppImage" 2>&1; then
+    log_warn "Failed to download Cursor AppImage"
+    log_info "This is optional - you can install manually later"
+    log_info "Download from: https://cursor.sh/download"
+    echo
+    log_info "Alternative: Use VS Code instead (already installed)"
+    return 0  # Return success (optional tool)
+  fi
 
   chmod +x "${CURSOR_DIR}/cursor.AppImage"
 
@@ -45,8 +54,9 @@ EOF
   export PATH="${HOME}/.local/bin:${PATH}"
 
   if ! command -v cursor >/dev/null 2>&1; then
-    log_error "Cursor installation failed"
-    return 1
+    log_warn "Cursor wrapper created but not in PATH yet"
+    log_info "Run: source ~/.bashrc"
+    return 0
   fi
 
   log_success "Cursor installed successfully!"
