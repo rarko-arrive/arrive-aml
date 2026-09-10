@@ -5,7 +5,8 @@ set -euo pipefail
 # Azure ML uses SMB/CIFS network mounts (~/cloudfiles/code/Users/) which are
 # slow for git operations. These settings optimize git for network storage.
 #
-# Expected improvement: 10-50x faster git operations
+# Expected improvement: 2-4x faster git operations (10-30s → 7-8s)
+# For truly fast git (<1s), use worktree-helper.sh to work in /tmp
 # Safe to run multiple times (idempotent)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,6 +58,13 @@ configure_git_performance() {
   git config --global pack.threads 4
   git config --global pack.windowMemory 256m
 
+  # Aggressive optimizations for network mounts
+  log_info "Applying aggressive network mount optimizations..."
+  git config --global core.checkStat minimal
+  git config --global core.trustctime false
+  git config --global core.ignoreStat true
+  git config --global status.showUntrackedFiles no
+
   # Configure user (if not already set)
   if [ -z "$(git config --global user.name 2>/dev/null || true)" ]; then
     log_info "Setting git user.name..."
@@ -69,7 +77,9 @@ configure_git_performance() {
   fi
 
   log_success "Git performance configuration complete!"
-  log_info "Expected improvement: 10-50x faster on network-mounted storage"
+  log_warn "Note: Untracked files hidden by default (use 'git status -u' to show)"
+  log_info "Expected: ~7-8s on network mount (down from 10-30s)"
+  log_info "For sub-second git: use scripts/lib/worktree-helper.sh to work in /tmp"
   echo
 }
 
