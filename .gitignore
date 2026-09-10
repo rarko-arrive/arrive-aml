@@ -24,3 +24,23 @@ dist/
 .ssh/*.key
 !.ssh/config.example
 !.ssh/README.md
+
+# Worktree helper metadata
+.network-path
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/settings.local.json
+.cursor/
+.idea/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+*~

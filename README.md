@@ -2,6 +2,8 @@
 
 Professional, comprehensive setup for Azure ML compute instances. Transform a fresh VM into a fully-configured development environment with a single command.
 
+**📖 [Quick Start →](QUICKSTART.md)** | **⚡ [Mirror Worktree Pattern →](docs/AZUREML-WORKTREE-PATTERN.md)** | **🔑 [Reuse SSH Keys →](docs/REUSE-SSH-KEY.md)**
+
 ## Quick Start
 
 ```bash
@@ -22,7 +24,7 @@ source ~/.bashrc
 
 | Tool | Description | Flag |
 |------|-------------|------|
-| **Git Optimization** | 10-50x faster git on Azure network storage (CRITICAL!) | `--git-optimize` |
+| **Git Optimization** | 2-4x faster git on Azure network storage + worktree helper | `--git-optimize` |
 | **System Tools** | git, curl, wget, htop, jq, tree, vim, build-essential | `--system-tools` |
 | **uv** | Fast Python package manager | `--uv` |
 | **GitHub CLI** | gh command-line tool | `--gh` |
@@ -35,17 +37,25 @@ source ~/.bashrc
 
 ## Git Performance on Azure ML
 
-**Problem**: Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) which makes git operations 10-100x slower than local disk.
+**Problem**: Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) which makes git operations 10-100x slower than local disk due to SMB/CIFS protocol overhead.
 
-**Solution**: This setup applies 15+ git configuration optimizations specifically for network-mounted file systems:
-
+**Solution 1 - Optimizations (Good)**: Applied automatically by setup:
 - Disables expensive file monitoring (`core.fsmonitor false`)
 - Optimizes index operations (`index.threads 4`, `feature.manyFiles true`)
 - Disables automatic garbage collection (`gc.auto 0`)
-- Increases network buffers
-- And more...
+- 15+ other network-optimized settings
+- **Result**: `git status` 10-30s → **7-8s** (2-4x faster)
 
-**Expected improvement**: `git status` from 5-30 seconds → <1 second
+**Solution 2 - Worktree Helper (Best)**: Work in fast local disk:
+```bash
+bash scripts/lib/worktree-helper.sh init  # Copy to /tmp
+cd /tmp/worktree-arrive-aml              # Work here
+# git status is now <1s (100x faster!)
+bash scripts/lib/worktree-helper.sh sync # Sync back when done
+```
+- **Result**: `git status` **<1 second** on local disk ⚡
+
+**Recommendation**: Use worktree helper for active development. The network mount is fundamentally limited by SMB/CIFS performance.
 
 ## Prerequisites
 
