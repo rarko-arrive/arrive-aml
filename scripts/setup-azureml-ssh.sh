@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Wire an Azure ML compute instance into ~/.ssh/config for Cursor Remote SSH,
-# and keep a gitignored copy at .ssh/config in this repo.
+# ⚠️  RUN THIS ON YOUR LAPTOP/MAC, NOT ON THE AZURE ML VM! ⚠️
+#
+# Configure SSH access FROM your laptop TO Azure ML compute instances.
+# This script updates YOUR laptop's ~/.ssh/config to enable Remote-SSH connections
+# in Cursor/VS Code.
+#
+# Usage (on your MacBook):
+#   cd ~/path/to/arrive-aml  # Your local clone
+#   bash scripts/setup-azureml-ssh.sh
+#
+# You'll be prompted for VM details from the Azure ML portal.
+# Run this script once per VM you want to connect to.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_SSH_DIR="$ROOT/.ssh"
@@ -10,6 +20,28 @@ REPO_CONFIG="$REPO_SSH_DIR/config"
 EXAMPLE="$REPO_SSH_DIR/config.example"
 USER_SSH_DIR="$HOME/.ssh"
 USER_CONFIG="$USER_SSH_DIR/config"
+
+# Detect if running on Azure ML VM (has azureml_py38 or similar conda env)
+if [ -d ~/cloudfiles/code/Users ] || command -v azureml-core >/dev/null 2>&1 || [ -f /etc/azure-ml-vm ]; then
+  echo "=================================================================="
+  echo "⚠️  WARNING: This script should run on your LAPTOP/Mac, not here!"
+  echo "=================================================================="
+  echo
+  echo "You're on an Azure ML VM. This script is for your laptop to"
+  echo "configure SSH access TO this VM."
+  echo
+  echo "Instead, on your MacBook:"
+  echo "  1. Clone arrive-aml locally"
+  echo "  2. Run: bash scripts/setup-azureml-ssh.sh"
+  echo "  3. Enter this VM's details when prompted"
+  echo
+  read -rp "Continue anyway? (y/N): " response
+  if [[ ! "$response" =~ ^[yY]$ ]]; then
+    echo "Exiting. Run this on your laptop instead."
+    exit 0
+  fi
+  echo
+fi
 
 echo "==> Azure ML → Cursor Remote SSH setup"
 echo
