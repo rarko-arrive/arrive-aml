@@ -1,0 +1,26 @@
+# Python / uv
+.venv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+*.egg-info/
+.ruff_cache/
+
+# macOS
+.DS_Store
+
+# Environment (secrets)
+.env
+
+# Local AI artifacts
+.ai/
+
+# SSH — keep the example + README; ignore real config and keys
+.ssh/config
+.ssh/*.pem
+.ssh/id_*
+.ssh/*.key
+!.ssh/config.example
+!.ssh/README.md
