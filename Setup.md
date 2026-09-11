@@ -170,7 +170,7 @@ bash scripts/bootstrap-azureml.sh
 `scripts/bootstrap-azureml.sh` will:
 
 1. Install `uv` if missing and ensure `~/.local/bin` is on `PATH`
-2. Create the project env on **local disk**: `~/uv-envs/ds-cursor-demo`  
+2. Create the project env on **local disk**: `~/uv-venvs/ds-cursor-demo`  
    (`cloudfiles` / Azure Files mounts are slow; `/mnt` can be wiped on recreate)
 3. `uv sync` into that path
 4. Symlink repo `.venv` → the local-disk env (so Cursor’s kernel picker matches the Mac happy path)
@@ -197,6 +197,6 @@ After that, select **Python Environments → `.venv`** the same way as on Mac. L
 |---------|-----|
 | `uv: command not found` | Open a new shell, or `source ~/.bashrc` (bootstrap adds `~/.local/bin`). |
 | No `.venv` / wrong kernel path | Re-run `bash scripts/bootstrap-azureml.sh`. Kernel path should end with `.venv/bin/python`. |
-| Slow `uv sync` / packages on cloudfiles | Env should live under `~/uv-envs/…`, not inside the repo mount. Re-run bootstrap. |
+| Slow `uv sync` / packages on cloudfiles | Env should live under `~/uv-venvs/…`, not inside the repo mount. Re-run bootstrap. |
 
 Never commit `.ssh/config` or `*.pem` — only `.ssh/config.example` is tracked.

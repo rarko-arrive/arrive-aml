@@ -151,8 +151,8 @@ main() {
     log_success "uv in ~/.local/bin"
   fi
 
-  if [ -d "${HOME}/uv-envs" ]; then
-    log_success "uv-envs directory exists: ${HOME}/uv-envs"
+  if [ -d "${HOME}/uv-venvs" ]; then
+    log_success "uv-venvs directory exists: ${HOME}/uv-venvs"
   fi
   echo
 
