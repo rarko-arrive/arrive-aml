@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Bootstrap an Azure ML compute instance for the Arrive-Logistics DS Cursor demo:
-# uv → local-disk venv (~/uv-envs/...) → .venv symlink → offline smoke test.
+# uv → local-disk venv (~/uv-venvs/...) → .venv symlink → offline smoke test.
 #
 # Run on the VM after Remote-SSH into the repo:
 #   bash scripts/bootstrap-azureml.sh
@@ -12,7 +12,7 @@ set -euo pipefail
 REPO="arrive-aml"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UV_BIN_DIR="${HOME}/.local/bin"
-UV_ENV_ROOT="${HOME}/uv-envs"
+UV_ENV_ROOT="${HOME}/uv-venvs"
 UV_PROJECT_ENVIRONMENT="${UV_ENV_ROOT}/${REPO}"
 
 cd "$ROOT"
