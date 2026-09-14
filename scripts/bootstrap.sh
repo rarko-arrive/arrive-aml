@@ -9,7 +9,7 @@ set -euo pipefail
 # What it does
 #   1. tools     scripts/setup-vm.sh --all   (git tuning, uv, gh, GitHub SSH, Docker, Claude Code)
 #   2. shell     ~/.bashrc block, ~/.config/arrive-aml/env, `aml-bootstrap` command
-#   3. repos     clone repos.conf into the SOT, mirror worktrees on /mnt/mirror, uv venvs
+#   3. repos     clone repos.conf into the SOT, local mirror clones on /mnt/mirror (auto-synced to SOT), uv venvs
 #   4. skills    team Claude Code skills from skills.conf -> ~/.claude/skills
 #   5. verify    scripts/verify-setup.sh
 #

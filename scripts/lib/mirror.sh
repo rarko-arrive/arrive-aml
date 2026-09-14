@@ -1,76 +1,33 @@
 #!/usr/bin/env bash
-# Mirror worktree helpers - source this file (it does not run anything).
+# Mirror helpers - source this file (it does not run anything).
 #
-# Pattern: the repo's .git database lives in the SOT on ~/cloudfiles (slow,
-# persistent, shared by ALL of your compute instances). Each compute instance
-# gets its own worktree on /mnt/mirror (fast, local, wiped on stop/start).
+# Pattern (see docs/AZUREML-WORKTREE-PATTERN.md):
+#   SOT     ~/cloudfiles/code/Users/<you>/main/REPO   persistent Azure Files share, slow
+#           (60-95 ms per file operation), shared by ALL of your compute instances.
+#           Holds the full .git database. HEAD detached - nobody edits here.
+#   mirror  /mnt/mirror/REPO   a FULL LOCAL CLONE on the fast local disk (git status
+#           ~5 ms). remotes:  origin = GitHub,  sot = the SOT path.
+#           Hooks push every commit to the SOT in the background, so the persistent
+#           copy is always current. /mnt is wiped on stop/start: `aml-bootstrap
+#           --restore` re-clones (GitHub first, SOT fallback) and re-fetches SOT branches.
 #
-# Rules implemented here:
-#  * The default branch is checked out in the mirror. The SOT is a database,
-#    so its HEAD is detached to free the branch (nobody works in the SOT).
-#  * Worktree registrations are locked with reason "host=<instance>" so that a
-#    `git worktree prune` run on another instance never deletes a live mirror.
-#  * Registrations left behind by a /mnt wipe on THIS host are removed before
-#    re-creating the mirror; other hosts' registrations are left alone.
+# Why not `git worktree`? A linked worktree keeps its index/HEAD/refs in the SOT's
+# .git on the share: still ~3 s per git command, plus cross-instance worktree
+# registration hazards. A clone is plain git: fast, per-instance, no shared state.
 
 # shellcheck source=scripts/lib/common.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+
+SYNC_LOG="${ARRIVE_STATE_DIR}/sot-sync.log"
 
 # Default branch of a repo: origin/HEAD, else main, else master, else current.
 repo_default_branch() {
   local repo="$1" ref=""
   ref="$(git -C "$repo" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-  if [ -z "$ref" ] && git -C "$repo" remote get-url origin >/dev/null 2>&1; then
-    git -C "$repo" remote set-head origin -a >/dev/null 2>&1 || true
-    ref="$(git -C "$repo" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-  fi
-  if [ -n "$ref" ]; then
-    echo "${ref#origin/}"
-    return 0
-  fi
+  if [ -n "$ref" ]; then echo "${ref#origin/}"; return 0; fi
   if git -C "$repo" show-ref -q --verify refs/heads/main; then echo main; return 0; fi
   if git -C "$repo" show-ref -q --verify refs/heads/master; then echo master; return 0; fi
   git -C "$repo" rev-parse --abbrev-ref HEAD
-}
-
-# Print the worktree path that has $2 checked out (empty if none).
-branch_holder() {
-  local repo="$1" branch="$2"
-  git -C "$repo" worktree list --porcelain 2>/dev/null | awk -v b="refs/heads/$branch" '
-    /^worktree /{wt=substr($0,10)}
-    /^branch /{ if ($2==b) print wt }'
-}
-
-# Remove worktree registrations for $mirror that are dead on this host.
-# A registration is considered ours when it is unlocked (legacy) or locked with
-# "host=<this host>". Registrations locked by another host are never touched.
-cleanup_stale_mirror_registration() {
-  local sot="$1" mirror="$2"
-  local common host dir gitdir locked id live_id=""
-  common="$(git -C "$sot" rev-parse --path-format=absolute --git-common-dir)"
-  host="$(this_host)"
-  [ -d "$common/worktrees" ] || return 0
-
-  if [ -f "$mirror/.git" ]; then
-    live_id="$(sed -n 's#^gitdir: .*/worktrees/##p' "$mirror/.git" | head -n1)"
-  fi
-
-  for dir in "$common"/worktrees/*/; do
-    [ -f "$dir/gitdir" ] || continue
-    id="$(basename "$dir")"
-    gitdir="$(tr -d '\r\n' < "$dir/gitdir")"
-    [ "$gitdir" = "$mirror/.git" ] || continue
-    [ "$id" = "$live_id" ] && continue
-
-    locked=""
-    [ -f "$dir/locked" ] && locked="$(tr -d '\r\n' < "$dir/locked")"
-    if [ -n "$locked" ] && [ "$locked" != "host=$host" ]; then
-      log_info "Keeping worktree registration '$id' (owned by another instance: $locked)"
-      continue
-    fi
-    log_info "Removing stale worktree registration '$id' for $mirror"
-    rm -rf "$dir"
-  done
 }
 
 # Undo the damage of a past core.ignoreStat=true: files flagged assume-unchanged
@@ -83,71 +40,191 @@ clear_assume_unchanged() {
   git -C "$repo" ls-files -z | git -C "$repo" update-index -z --no-assume-unchanged --stdin
 }
 
-# True when $mirror is a healthy worktree whose database is $sot/.git
-mirror_is_valid() {
-  local sot="$1" mirror="$2" common
-  [ -f "$mirror/.git" ] || return 1
-  common="$(git -C "$mirror" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  [ -n "$common" ] || return 1
-  [ "$common" -ef "$sot/.git" ]
+# Remove worktree registrations in the SOT that point at $mirror (legacy pattern).
+# Registrations locked by another instance are left alone.
+remove_mirror_worktree_registration() {
+  local sot="$1" mirror="$2" common host dir gitdir locked
+  common="$(git -C "$sot" rev-parse --path-format=absolute --git-common-dir)"
+  host="$(this_host)"
+  [ -d "$common/worktrees" ] || return 0
+  for dir in "$common"/worktrees/*/; do
+    [ -f "$dir/gitdir" ] || continue
+    gitdir="$(tr -d '\r\n' < "$dir/gitdir")"
+    [ "$gitdir" = "$mirror/.git" ] || continue
+    locked=""
+    [ -f "$dir/locked" ] && locked="$(tr -d '\r\n' < "$dir/locked")"
+    if [ -n "$locked" ] && [ "$locked" != "host=$host" ]; then
+      continue
+    fi
+    log_info "Removing legacy worktree registration '$(basename "$dir")'"
+    rm -rf "$dir"
+  done
 }
 
-# Ensure a mirror worktree exists for the SOT repo. Idempotent.
-# Usage: ensure_mirror_worktree SOT_REPO_PATH MIRROR_PATH
+# True when $mirror is a local clone whose 'sot' remote is $sot
+mirror_is_valid() {
+  local sot="$1" mirror="$2" url
+  [ -d "$mirror/.git" ] || return 1
+  url="$(git -C "$mirror" remote get-url sot 2>/dev/null || true)"
+  [ -n "$url" ] || return 1
+  [ "$url" -ef "$sot" ]
+}
+
+# Commits on the current branch that have not reached the SOT yet (0 when in sync)
+mirror_unsynced_count() {
+  local mirror="$1" branch
+  branch="$(git -C "$mirror" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  [ -n "$branch" ] || { echo 0; return 0; }
+  if git -C "$mirror" show-ref -q --verify "refs/remotes/sot/$branch"; then
+    git -C "$mirror" rev-list --count "sot/$branch..HEAD" 2>/dev/null || echo 0
+  else
+    git -C "$mirror" rev-list --count HEAD 2>/dev/null || echo 0
+  fi
+}
+
+# Install the hooks that keep the SOT current after every commit/merge/rewrite.
+install_sot_sync_hooks() {
+  local mirror="$1" hooks
+  hooks="$(git -C "$mirror" rev-parse --path-format=absolute --git-path hooks)"
+  mkdir -p "$hooks" "$ARRIVE_STATE_DIR"
+  cat > "$hooks/arrive-aml-sync-sot" <<'HOOK'
+#!/usr/bin/env bash
+# arrive-aml: push the current branch to the persistent SOT copy (cloudfiles) in the
+# background. Runs from post-commit, post-merge and post-rewrite. Serialized with flock.
+# Log: ~/.local/state/arrive-aml/sot-sync.log   Manual: git push sot HEAD
+kind="$(basename "${0##*/}")"; [ -n "${ARRIVE_HOOK_KIND:-}" ] && kind="$ARRIVE_HOOK_KIND"
+branch="$(git symbolic-ref -q --short HEAD)" || exit 0
+git remote get-url sot >/dev/null 2>&1 || exit 0
+state="${HOME}/.local/state/arrive-aml"; mkdir -p "$state"
+log="$state/sot-sync.log"; lock="$state/sot-sync.$(basename "$(git rev-parse --show-toplevel)").lock"
+force=""; [ "$kind" = "post-rewrite" ] && force="--force-with-lease"
+(
+  exec 9>"$lock"; flock 9
+  if out="$(git push -q $force sot "HEAD:refs/heads/$branch" 2>&1)"; then
+    printf '%s ok   %s %s -> sot\n' "$(date '+%F %T')" "$(basename "$PWD")" "$branch" >> "$log"
+  else
+    printf '%s FAIL %s %s -> sot: %s\n' "$(date '+%F %T')" "$(basename "$PWD")" "$branch" "$(echo "$out" | tr '\n' ' ')" >> "$log"
+  fi
+) >/dev/null 2>&1 &
+disown 2>/dev/null || true
+exit 0
+HOOK
+  chmod +x "$hooks/arrive-aml-sync-sot"
+  local h
+  for h in post-commit post-merge post-rewrite; do
+    printf '#!/usr/bin/env bash\nARRIVE_HOOK_KIND=%s exec "$(dirname "$0")/arrive-aml-sync-sot" "$@"\n' "$h" > "$hooks/$h"
+    chmod +x "$hooks/$h"
+  done
+}
+
+# Remotes, upstream and config for a mirror clone
+configure_mirror_clone() {
+  local sot="$1" mirror="$2" branch="$3" github_url="$4"
+  local sot_url
+  sot_url="$(stable_cloudfiles_path "$sot")"
+
+  if git -C "$mirror" remote get-url sot >/dev/null 2>&1; then
+    git -C "$mirror" remote set-url sot "$sot_url"
+  else
+    git -C "$mirror" remote add sot "$sot_url"
+  fi
+  if [ -n "$github_url" ]; then
+    if git -C "$mirror" remote get-url origin >/dev/null 2>&1; then
+      git -C "$mirror" remote set-url origin "$github_url"
+    else
+      git -C "$mirror" remote add origin "$github_url"
+    fi
+  fi
+  git -C "$mirror" config remote.pushDefault origin
+  git -C "$mirror" config checkout.defaultRemote origin
+  git -C "$mirror" config remote.sot.tagOpt --no-tags
+  if git -C "$mirror" show-ref -q --verify "refs/remotes/origin/$branch" && \
+     git -C "$mirror" show-ref -q --verify "refs/heads/$branch"; then
+    git -C "$mirror" branch -q --set-upstream-to="origin/$branch" "$branch" 2>/dev/null || true
+  fi
+  install_sot_sync_hooks "$mirror"
+}
+
+# Keep the SOT a pure database: detach its HEAD if it sits on a branch (and is clean).
+detach_sot() {
+  local sot="$1"
+  git -C "$sot" symbolic-ref -q HEAD >/dev/null 2>&1 || return 0
+  if [ -n "$(git -C "$sot" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    log_warn "SOT $sot has uncommitted changes - not detaching its HEAD (commit or stash them in the mirror instead)"
+    return 0
+  fi
+  log_info "Detaching SOT HEAD (the SOT is a database; work happens in the mirror)"
+  git -C "$sot" checkout -q --detach
+}
+
+# Ensure a fast local mirror clone exists for the SOT repo. Idempotent.
+# Usage: ensure_mirror_worktree SOT_REPO_PATH MIRROR_PATH   (name kept for callers)
 ensure_mirror_worktree() {
   local sot="$1" mirror="$2"
-  local host branch holder sot_real bak
+  local branch github_url bak
 
   if [ ! -d "$sot/.git" ]; then
     log_error "Source of Truth not found: $sot"
     return 1
   fi
 
-  host="$(this_host)"
   ensure_local_dir "$(dirname "$mirror")"
   clear_assume_unchanged "$sot"
+  branch="$(repo_default_branch "$sot")"
+  github_url="$(git -C "$sot" remote get-url origin 2>/dev/null || true)"
 
   if [ -e "$mirror" ]; then
     if mirror_is_valid "$sot" "$mirror"; then
+      configure_mirror_clone "$sot" "$mirror" "$branch" "$github_url"
       clear_assume_unchanged "$mirror"
+      detach_sot "$sot"
       log_success "Mirror OK: $mirror ($(git -C "$mirror" rev-parse --abbrev-ref HEAD 2>/dev/null))"
       return 0
     fi
-    bak="${mirror}.broken-$(date +%Y%m%d%H%M%S)"
-    log_warn "$mirror is not a valid worktree of $sot - moving it to $bak (your files are kept)"
-    mv "$mirror" "$bak"
-  fi
-
-  cleanup_stale_mirror_registration "$sot" "$mirror"
-
-  branch="$(repo_default_branch "$sot")"
-  holder="$(branch_holder "$sot" "$branch")"
-  sot_real="$(cd "$sot" && pwd -P)"
-
-  if [ -n "$holder" ] && [ "$(cd "$holder" 2>/dev/null && pwd -P)" = "$sot_real" ]; then
-    # The SOT is a database, not a workplace: detach it so the mirror can own the branch.
-    if [ -n "$(git -C "$sot" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-      log_warn "SOT has uncommitted changes on '$branch' - leaving SOT as is; mirror starts detached"
+    if [ -f "$mirror/.git" ]; then
+      # legacy linked worktree: its commits already live in the SOT
+      if [ -z "$(git -C "$mirror" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+        log_info "Replacing legacy worktree mirror with a local clone: $mirror"
+        rm -rf "$mirror"
+      else
+        bak="${mirror}.old-worktree-$(date +%Y%m%d%H%M%S)"
+        log_warn "$mirror is a legacy worktree WITH uncommitted changes - moving it to $bak"
+        mv "$mirror" "$bak"
+      fi
+      remove_mirror_worktree_registration "$sot" "$mirror"
     else
-      log_info "Detaching SOT HEAD so '$branch' can live in the mirror (SOT keeps the full .git database)"
-      git -C "$sot" checkout -q --detach
-      holder=""
+      bak="${mirror}.broken-$(date +%Y%m%d%H%M%S)"
+      log_warn "$mirror is not a valid mirror of $sot - moving it to $bak (your files are kept)"
+      mv "$mirror" "$bak"
     fi
-  fi
-
-  log_info "Creating mirror worktree: $mirror (branch: $branch, owner: host=$host)"
-  if [ -z "$holder" ]; then
-    git -C "$sot" worktree add --lock --reason "host=$host" "$mirror" "$branch"
   else
-    log_warn "'$branch' is checked out elsewhere ($holder) - creating a detached mirror"
-    git -C "$sot" worktree add --lock --reason "host=$host" --detach "$mirror" "$branch"
-    log_info "Start work with: cd $mirror && git checkout -b feature/<name>"
+    remove_mirror_worktree_registration "$sot" "$mirror"
   fi
 
-  log_success "Mirror created: $mirror"
+  detach_sot "$sot"
+
+  log_info "Cloning mirror: $mirror (branch: $branch)"
+  if [ -n "$github_url" ] && git clone -q -b "$branch" "$github_url" "$mirror" 2>/dev/null; then
+    log_info "  cloned from GitHub; fetching branches only the SOT has (slow share, be patient)..."
+    configure_mirror_clone "$sot" "$mirror" "$branch" "$github_url"
+    git -C "$mirror" fetch -q sot 2>/dev/null || log_warn "  could not fetch from the SOT (will retry on next bootstrap)"
+    # fast-forward the default branch to whatever the SOT has (commits not pushed to GitHub yet)
+    if git -C "$mirror" show-ref -q --verify "refs/remotes/sot/$branch"; then
+      git -C "$mirror" merge -q --ff-only "sot/$branch" 2>/dev/null || true
+    fi
+  else
+    log_info "  GitHub unavailable - cloning from the SOT over the share (slow, one-time)..."
+    rm -rf "$mirror"
+    git clone -q --no-local -b "$branch" "$sot" "$mirror" || { log_error "clone failed for $mirror"; return 1; }
+    git -C "$mirror" remote rename origin sot
+    configure_mirror_clone "$sot" "$mirror" "$branch" "$github_url"
+    [ -n "$github_url" ] && git -C "$mirror" fetch -q origin 2>/dev/null || true
+  fi
+
+  log_success "Mirror ready: $mirror [$branch]  (origin=GitHub, sot=$(stable_cloudfiles_path "$sot"))"
 }
 
-# Print all mirrors registered for a SOT repo (path + branch), one per line.
+# Print the remotes/branches of a mirror (for --list)
 list_repo_worktrees() {
   local repo="$1"
   git -C "$repo" worktree list 2>/dev/null || true

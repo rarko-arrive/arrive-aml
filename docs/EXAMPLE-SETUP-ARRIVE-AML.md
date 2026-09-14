@@ -1,3 +1,8 @@
+> **Note (2026-09):** mirrors are now full local clones with the SOT as remote `sot`
+> (see [AZUREML-WORKTREE-PATTERN.md](AZUREML-WORKTREE-PATTERN.md)). Where this walkthrough shows
+> `git worktree add/remove/prune` against `/mnt/mirror/<repo>`, use `aml-bootstrap --restore`
+> or `bash scripts/lib/setup-mirror-worktree.sh <repo>` instead. Never `git worktree prune` in a SOT.
+
 # Example: Setting Up arrive-aml with Mirror Worktree Pattern
 
 This is a **complete walkthrough** showing how to set up the arrive-aml repository using the canonical Azure ML workflow.
@@ -49,7 +54,7 @@ cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 bash scripts/lib/setup-mirror-worktree.sh
 
 # This creates:
-# /mnt/mirror/arrive-aml/ ← Your active worktree (FAST!)
+# /mnt/mirror/arrive-aml/ ← Your active mirror clone (FAST!)
 ```
 
 ### Step 4: Switch to Mirror
@@ -301,7 +306,7 @@ After complete setup:
 │       └── ...
 │
 └── /mnt/mirror/
-    └── arrive-aml/              ← Active worktree (WORK HERE!) [main]
+    └── arrive-aml/              ← Active mirror clone (WORK HERE!) [main]
         ├── .git ───┐            ← Pointer to SOT's .git
         ├── .venv ──┼──> /mnt/uv-venvs/arrive-aml/
         ├── scripts/│

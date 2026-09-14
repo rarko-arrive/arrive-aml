@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Set up all configured repositories (idempotent)
 #   1. clone each repo from repos.conf into the SOT (~/cloudfiles/code/Users/<you>/main)
-#   2. create/repair its mirror worktree on /mnt/mirror  (AUTO_MIRROR=yes)
+#   2. create/repair its fast local mirror clone on /mnt/mirror  (AUTO_MIRROR=yes)
 #   3. create/refresh its uv venv on local disk + .venv symlink in the mirror
 #
 # Safe to re-run after every VM restart (/mnt is wiped on stop/start).
@@ -146,6 +146,7 @@ setup_repos() {
     [ -f "$d/.git" ] && echo "  cd $d"
   done
   echo
+  echo "Every commit in a mirror is pushed to the SOT in the background (log: ~/.local/state/arrive-aml/sot-sync.log)."
   echo "After a VM restart (/mnt wiped):  aml-bootstrap --restore"
   print_separator
   [ "$failed" -eq 0 ]

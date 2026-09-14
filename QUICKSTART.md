@@ -31,7 +31,8 @@ source ~/.bashrc
 ## After every VM stop/start
 
 `/mnt` is the ephemeral resource disk: mirrors and venvs are gone after a restart. Your
-commits are safe (they live in the SOT's `.git` on cloudfiles). Recreate in about a minute:
+commits are safe (a hook pushed them to the SOT's `.git` on cloudfiles seconds after you
+committed; `verify-setup.sh` warns if one did not make it). Recreate in about a minute:
 
 ```bash
 aml-bootstrap --restore
@@ -42,16 +43,17 @@ Your shell prints a reminder when `/mnt/mirror` is missing.
 ## Daily workflow
 
 ```bash
-cd /mnt/mirror/arrive-aml        # fast local disk, <1s git
-git checkout -b feature/thing    # branch, work, commit, push as usual
+cd /mnt/mirror/arrive-aml        # local clone: git status ~5 ms
+git checkout -b feature/thing    # branch, work, commit; each commit is pushed to the SOT by a hook
+git push                         # -> GitHub (origin), as usual
 uv run python script.py          # .venv -> /mnt/uv-venvs/arrive-aml
 claude                            # then /work-in-repo
 ```
 
 | Location | `git status` | Use for |
 |----------|--------------|---------|
-| `~/cloudfiles/code/Users/<you>/main/REPO` (SOT) | 7-30 s | Holds the `.git` database. Do not edit here. |
-| `/mnt/mirror/REPO` | <1 s | All development |
+| `~/cloudfiles/code/Users/<you>/main/REPO` (SOT) | ~5 s | Persistent `.git` database, remote `sot` of the mirror. Do not edit here. |
+| `/mnt/mirror/REPO` | ~5 ms | All development |
 
 ## Connect from your laptop (Cursor / VS Code)
 

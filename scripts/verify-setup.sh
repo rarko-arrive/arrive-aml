@@ -178,8 +178,15 @@ main() {
       fi
       [ "$mirror" = "yes" ] || { log_success "$name: SOT only (AUTO_MIRROR=$mirror)"; continue; }
       if mirror_is_valid "$sot" "$mir"; then
-        local branch venv_msg=""
+        local branch venv_msg="" unsynced
         branch="$(git -C "$mir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+        unsynced="$(mirror_unsynced_count "$mir")"
+        if [ "${unsynced:-0}" -gt 0 ]; then
+          fail "$name: $unsynced commit(s) on $branch not yet in the SOT" "cd $mir && git push sot HEAD   (see ~/.local/state/arrive-aml/sot-sync.log)"
+        fi
+        if [ ! -x "$mir/.git/hooks/arrive-aml-sync-sot" ]; then
+          fail "$name: SOT sync hooks missing" "bash scripts/lib/setup-mirror-worktree.sh $name"
+        fi
         if [ -f "$mir/pyproject.toml" ]; then
           if [ -x "$mir/.venv/bin/python" ]; then
             venv_msg=", venv ok"
@@ -190,7 +197,11 @@ main() {
         fi
         log_success "$name: mirror $mir [$branch]$venv_msg"
       else
-        fail "$name: mirror missing or broken at $mir" "aml-bootstrap --restore   (or: bash scripts/setup-repos.sh --only $name)"
+        if [ -f "$mir/.git" ]; then
+          fail "$name: legacy worktree mirror at $mir (slow, shared registrations)" "aml-bootstrap --restore   (converts it to a local clone)"
+        else
+          fail "$name: mirror missing or broken at $mir" "aml-bootstrap --restore   (or: bash scripts/setup-repos.sh --only $name)"
+        fi
       fi
     done < "${ARRIVE_ROOT}/repos.conf"
   fi

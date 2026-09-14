@@ -52,7 +52,7 @@ uses the `claude` binary on the VM, so the VM-side install and login above are w
 | `claude: command not found` | `bash scripts/lib/install-claude.sh && source ~/.bashrc` |
 | Not logged in | `claude auth login` (headless: open the URL on your laptop, paste the code) |
 | Skills repo out of date | `bash scripts/lib/install-claude-skills.sh` (does `git pull --ff-only`) |
-| Mirror worktree broken | `aml-bootstrap --restore` |
+| Mirror broken or missing | `aml-bootstrap --restore` |
 
 ## Adding another skills repo
 

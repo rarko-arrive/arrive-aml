@@ -17,16 +17,18 @@ Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) via SMB/CIFS,
                                             compute instance the user owns
                                           - Full .git database; HEAD is detached (never edit here)
 
-/mnt/mirror/REPO/                        ← Active Worktree (one per compute instance)
-                                          - Local disk (fast: <1s git status)
-                                          - Git worktree linked to SOT's .git, on the default branch
+/mnt/mirror/REPO/                        ← Active mirror (one per compute instance)
+                                          - Local disk: FULL CLONE, git status ~5 ms
+                                          - remotes: origin = GitHub, sot = the SOT path
+                                          - post-commit/merge/rewrite hooks push the branch to
+                                            the SOT in the background (log: ~/.local/state/arrive-aml/sot-sync.log)
                                           - Where all development happens
                                           - /mnt is Azure's EPHEMERAL resource disk: wiped on stop/start
 ```
 
-**Key insight**: Both locations share the same `.git` database via `git worktree add`. Commits in the mirror are stored in SOT's `.git/` immediately. This is NOT a sync script - it's native git functionality.
+**Key insight**: the mirror is plain git - a local clone with two remotes. Every commit is pushed to the SOT's `.git` by a hook within seconds, so the persistent copy is always current, and `git push` goes to GitHub as usual. Measured on rarko1: `git status` 5.4 s in the SOT, 3.0 s in a linked worktree (its index/HEAD/refs still live on the share, 60-95 ms per file op), 0.005 s in the clone. That is why linked worktrees were dropped; `mirror.sh` migrates legacy worktree mirrors automatically and removes their registrations from the SOT.
 
-**Multi-VM rules** (implemented in `scripts/lib/mirror.sh`): worktree registrations are locked with `--reason host=<instance>` so one VM's `git worktree prune` can never destroy another VM's mirror; a stale registration from this host is removed before re-creating; if another VM already holds the default branch the new mirror starts detached. `/mnt` wipes are expected: `aml-bootstrap --restore` recreates mirrors and venvs in about a minute.
+`/mnt` wipes are expected: `aml-bootstrap --restore` re-clones (GitHub first, SOT fallback), fetches the branches only the SOT has, and rebuilds venvs. Only uncommitted edits (and commits whose background push failed - `verify-setup.sh` reports those) can be lost.
 
 ## Directory Structure
 
@@ -41,7 +43,7 @@ scripts/
 ├── setup-azureml-ssh.sh     # Laptop SSH config for Remote-SSH (run on the laptop)
 └── lib/                     # Modular pieces (all idempotent)
     ├── common.sh            # Logging, detect_sot_base, this_host, github_ssh_ok, ensure_local_dir, trim
-    ├── mirror.sh            # ensure_mirror_worktree + stale-registration cleanup (source only)
+    ├── mirror.sh            # ensure_mirror_worktree (local clone + sot remote + sync hooks; source only)
     ├── configure-git.sh     # Network-optimized git settings + safe.directory * + push.autoSetupRemote
     ├── configure-github-ssh.sh  # Key, ~/.ssh/config, known_hosts, gh upload, port-443 fallback
     ├── configure-shell.sh   # ~/.bashrc managed block, ~/.config/arrive-aml/env, `aml-bootstrap` shim
@@ -70,7 +72,7 @@ git@github.com:rarko-arrive/arrive-aml.git|arrive-aml|yes
 
 `scripts/setup-repos.sh` parses this file and, per repo:
 1. Clones it to the SOT base (derived from where this arrive-aml checkout's `.git` lives: `~/cloudfiles/code/Users/<aml-user>/main`; override with `ARRIVE_SOT_BASE`)
-2. Creates or repairs the mirror worktree at `/mnt/mirror/REPO_NAME/` (if AUTO_MIRROR=yes)
+2. Creates or repairs the mirror clone at `/mnt/mirror/REPO_NAME/` (if AUTO_MIRROR=yes)
 3. Runs `uv sync` into `/mnt/uv-venvs/REPO_NAME` and symlinks `.venv` in the mirror (if `pyproject.toml` exists)
 
 Default repos: arrive-aml (this repo), azureml-skills (Claude Code skills), arrive-ds (data science utilities)
@@ -107,7 +109,7 @@ The project uses **uv** for Python package management (pyproject.toml). Virtual 
 cd /mnt/mirror/arrive-aml
 
 # Regular git workflow works normally
-git status    # <1 second
+git status    # ~5 ms
 git pull
 git checkout -b feature/new-setup
 # make changes
@@ -147,13 +149,9 @@ All scripts in `scripts/lib/` are:
 
 ## Key Non-Obvious Patterns
 
-1. **/mnt is ephemeral** - `/mnt` is Azure's resource disk (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`); mirrors, venvs and the uv cache vanish on every stop/start. Commits are safe (in the SOT's `.git`). `aml-bootstrap --restore` recreates everything; the bashrc block prints a reminder when `/mnt/mirror` is missing. The SOT is shared by all of the user's compute instances, so never run `git worktree prune` in a SOT by hand.
+1. **/mnt is ephemeral** - `/mnt` is Azure's resource disk (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`); mirrors, venvs and the uv cache vanish on every stop/start. Commits are safe once the sync hook pushed them to the SOT (seconds). `aml-bootstrap --restore` recreates everything; the bashrc block prints a reminder when `/mnt/mirror` is missing. The SOT is shared by all of the user's compute instances (it is a plain repo with detached HEAD acting as a local remote).
 
-2. **Multiple worktrees pattern** - Can create multiple mirrors from same SOT for parallel work on different branches:
-   ```bash
-   git worktree add /mnt/mirror/arrive-aml-feature1 feature/one
-   git worktree add /mnt/mirror/arrive-aml-feature2 feature/two
-   ```
+2. **Parallel branches** - the mirror is a normal clone, so `git worktree add /mnt/mirror/arrive-aml-feature1 feature/one` from the mirror works and stays fully local (its admin files live in the mirror's `.git`, not on the share).
 
 3. **Python venv symlink** - `.venv` symlinks to `/mnt/uv-venvs/PROJECT_NAME` so it's on fast local disk but repo-relative for IDE integration. Paths are configurable in `~/.config/arrive-aml/env`.
 

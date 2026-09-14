@@ -38,7 +38,7 @@ What happens (all idempotent, re-run any time):
 |------|------|----------------|
 | 1 | git tuned for the network mount, uv, gh, GitHub SSH key, Docker, Claude Code | OS disk (persists) |
 | 2 | `aml-bootstrap` command, `~/.config/arrive-aml/env`, bashrc block | OS disk |
-| 3 | every repo in `repos.conf` cloned to the SOT, mirror worktree, uv venv | SOT: cloudfiles. Mirror + venv: `/mnt` |
+| 3 | every repo in `repos.conf` cloned to the SOT, local mirror clone (+ SOT sync hooks), uv venv | SOT: cloudfiles. Mirror + venv: `/mnt` |
 | 4 | team Claude Code skills (`skills.conf`) linked into `~/.claude/skills` | OS disk |
 | 5 | verification - each failed check prints its fix | |
 
@@ -86,8 +86,9 @@ git add -A && git commit -m "..."
 git push                              # push.autoSetupRemote is on
 ```
 
-Commits are written to the SOT's `.git` on cloudfiles immediately (the mirror is a git
-worktree, not a copy), so nothing is lost if `/mnt` disappears - only uncommitted edits.
+Each commit is pushed to the SOT's `.git` on cloudfiles by a background hook (remote `sot`),
+so nothing is lost if `/mnt` disappears - only uncommitted edits. `bash scripts/verify-setup.sh`
+reports any commit whose push did not make it (`git push sot HEAD` to retry).
 
 ## After a VM stop/start
 
@@ -110,7 +111,7 @@ and the restore runs on every start without you.
 ├── azureml-skills/
 └── arrive-ds/
 
-/mnt/mirror/                             per-VM worktrees - fast, wiped on stop/start
+/mnt/mirror/                             per-VM local clones - fast, wiped on stop/start
 ├── arrive-aml/    [main]  .venv -> /mnt/uv-venvs/arrive-aml
 ├── azureml-skills/[main]
 └── arrive-ds/     [main]  .venv -> /mnt/uv-venvs/arrive-ds
@@ -125,7 +126,7 @@ and the restore runs on every start without you.
 |-------|-----|
 | `Could not determine the SOT base` | arrive-aml must live at `~/cloudfiles/code/Users/<you>/main/arrive-aml` (or `export ARRIVE_SOT_BASE=...`) |
 | `Clone failed` / `Permission denied (publickey)` | `gh auth login`, then `bash scripts/lib/configure-github-ssh.sh` |
-| `main is checked out elsewhere` | Another of your VMs holds `main` in its mirror. This mirror starts detached: `git checkout -b feature/x` |
+| `! [rejected]` in `~/.local/state/arrive-aml/sot-sync.log` | Another VM pushed the same branch to the SOT first: `git pull sot <branch>` then commit again |
 | Mirror exists but git errors | `aml-bootstrap --restore` moves the broken dir to `*.broken-<time>` and recreates it |
 | OS disk >90% full | Delete legacy venvs: `rm -rf ~/uv-venvs/<name>`; old VS Code servers: `~/.vscode-server/cli/servers/` |
 | `claude: command not found` | `bash scripts/lib/install-claude.sh && source ~/.bashrc` |

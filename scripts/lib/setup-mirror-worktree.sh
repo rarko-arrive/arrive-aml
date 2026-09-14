@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Create (or repair) the /mnt/mirror worktree for ONE repository.
+# Create (or repair) the /mnt/mirror local clone for ONE repository.
 # See docs/AZUREML-WORKTREE-PATTERN.md
 #
 # Usage:
@@ -25,7 +25,11 @@ list_worktrees() {
   for sot in "$sot_base"/*/; do
     [ -d "$sot/.git" ] || continue
     log_info "$(basename "$sot")"
-    list_repo_worktrees "$sot" | sed 's/^/  /'
+    if mirror_is_valid "$sot" "${MIRROR_BASE}/$(basename "$sot")"; then
+      echo "  mirror ${MIRROR_BASE}/$(basename "$sot") [$(git -C "${MIRROR_BASE}/$(basename "$sot")" rev-parse --abbrev-ref HEAD)]  unsynced: $(mirror_unsynced_count "${MIRROR_BASE}/$(basename "$sot")")"
+    else
+      echo "  no mirror"
+    fi
   done
 }
 

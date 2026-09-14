@@ -36,7 +36,7 @@ bash scripts/verify-setup.sh # every failed check prints the exact fix
 | **Cursor** | Checks the Remote-SSH server; the editor runs on your laptop | `--cursor` |
 | **Conda Disable** | Disables conda auto-activation (preserves install) | `--disable-conda` |
 
-Beyond `setup-vm.sh`, `bootstrap.sh` also sets up repositories (`repos.conf`): SOT clone on cloudfiles, mirror worktree on `/mnt/mirror`, uv venv on `/mnt/uv-venvs` with a `.venv` symlink.
+Beyond `setup-vm.sh`, `bootstrap.sh` also sets up repositories (`repos.conf`): SOT clone on cloudfiles, local mirror clone on `/mnt/mirror` (auto-synced to the SOT), uv venv on `/mnt/uv-venvs` with a `.venv` symlink.
 
 ## Git Performance on Azure ML
 
@@ -49,12 +49,12 @@ Beyond `setup-vm.sh`, `bootstrap.sh` also sets up repositories (`repos.conf`): S
 - 15+ other network-optimized settings
 - **Result**: `git status` 10-30s → **7-8s** (2-4x faster)
 
-**Solution 2 - Mirror Worktree (Best)**: work on fast local disk, commit into the persistent database:
+**Solution 2 - Local Mirror (Best)**: work in a full local clone; hooks push every commit to the persistent SOT:
 ```bash
-cd /mnt/mirror/arrive-aml   # git worktree of ~/cloudfiles/.../arrive-aml/.git, created by bootstrap.sh
-git status                  # <1 second
+cd /mnt/mirror/arrive-aml   # local clone; remotes: origin = GitHub, sot = ~/cloudfiles/.../arrive-aml
+git status                  # ~5 ms
 ```
-- **Result**: `git status` **<1 second** on local disk ⚡; commits land in the SOT's `.git` on cloudfiles immediately.
+- **Result**: `git status` **5 ms** (measured: 5.4 s in the SOT, 3 s in a linked worktree); commits reach the SOT's `.git` on cloudfiles within seconds via the post-commit hook.
 - `/mnt` is Azure's ephemeral resource disk (wiped on stop/start). `aml-bootstrap --restore` recreates every mirror and venv in about a minute; only uncommitted edits can be lost.
 
 **Recommendation**: Always work in `/mnt/mirror/<repo>`. Never edit in the SOT. See [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md).
@@ -250,7 +250,7 @@ arrive-aml/
 │   ├── setup-azureml-ssh.sh        # Laptop-side SSH configuration
 │   └── lib/                        # Modular, idempotent pieces
 │       ├── common.sh               # Logging, path detection, GitHub helpers
-│       ├── mirror.sh               # Mirror worktree logic (per-host locks, stale cleanup)
+│       ├── mirror.sh               # Mirror clone logic (sot remote, sync hooks, legacy migration)
 │       ├── configure-git.sh        # Git performance + safe.directory
 │       ├── configure-github-ssh.sh # GitHub SSH key/config/upload/test
 │       ├── configure-shell.sh      # bashrc block, ~/.config/arrive-aml/env, aml-bootstrap
@@ -279,7 +279,7 @@ bash scripts/lib/configure-git.sh  # re-apply the network-mount git settings
 
 ### Mirror missing or broken after a restart
 
-`/mnt` is the ephemeral resource disk. `aml-bootstrap --restore` recreates every mirror and venv; a broken mirror directory is moved to `<mirror>.broken-<timestamp>` so nothing is lost.
+`/mnt` is the ephemeral resource disk. `aml-bootstrap --restore` recreates every mirror and venv; a broken mirror directory is moved to `<mirror>.broken-<timestamp>` so nothing is lost. If the background push to the SOT failed for a commit, `verify-setup.sh` lists it; fix with `git push sot HEAD` (log: `~/.local/state/arrive-aml/sot-sync.log`).
 
 ### Docker Permission Denied?
 

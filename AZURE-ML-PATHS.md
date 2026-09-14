@@ -37,7 +37,7 @@ All team repositories should be in:
 **Why `/main` subdirectory?**
 - Keeps main branch checkouts organized
 - Allows for other branches in parallel directories if needed
-- Matches git worktree best practices
+- Keeps the SOT (remote `sot` of every mirror) separate from experiments
 
 ## Auto-Detection
 
@@ -75,9 +75,9 @@ After `setup-repos.sh`:
 └── arrive-ds/           ← SOT
 
 /mnt/mirror/
-├── arrive-aml/          ← Fast mirror worktree
-├── azureml-skills/      ← Fast mirror worktree
-└── arrive-ds/           ← Fast mirror worktree
+├── arrive-aml/          ← Fast local mirror clone
+├── azureml-skills/      ← Fast local mirror clone
+└── arrive-ds/           ← Fast local mirror clone
 ```
 
 ## Working Directory
