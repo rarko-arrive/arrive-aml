@@ -2,7 +2,7 @@
 
 Professional, comprehensive setup for Azure ML compute instances. One command turns a fresh VM into a fully-configured data-science environment: tuned git, uv, GitHub CLI + SSH, Docker, Claude Code + team skills, and every team repo cloned to persistent storage with a fast `/mnt/mirror` worktree and a local-disk venv.
 
-**📖 [Quick Start →](QUICKSTART.md)** | **🚶 [Happy Path →](HAPPY-PATH.md)** | **⚡ [Mirror Worktree Pattern →](docs/AZUREML-WORKTREE-PATTERN.md)** | **🔑 [Reuse SSH Keys →](docs/REUSE-SSH-KEY.md)**
+**⭐ [The Workflow (read this first) →](summary.md)** | **📖 [Quick Start →](QUICKSTART.md)** | **🚶 [Happy Path →](HAPPY-PATH.md)** | **⚡ [Mirror Worktree Pattern →](docs/AZUREML-WORKTREE-PATTERN.md)** | **🔑 [Reuse SSH Keys →](docs/REUSE-SSH-KEY.md)**
 
 ## Quick Start
 

@@ -192,6 +192,7 @@ When modifying setup scripts:
 
 ## Documentation Hierarchy
 
+- **summary.md**: THE workflow every scientist repeats (fresh VM, after restart, per-PR loop, troubleshooting, why it is built this way)
 - **README.md**: User-facing quick start
 - **QUICKSTART.md**: One-page copy-paste guide (bootstrap + restore + daily workflow)
 - **HAPPY-PATH.md**: Step-by-step setup for fresh VM, including the startup-script option

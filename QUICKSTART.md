@@ -90,4 +90,4 @@ Common fixes:
 | Docker permission denied | `newgrp docker` (or log out/in) |
 | OS disk full | old venvs in `~/uv-venvs/` can be deleted; venvs now live in `/mnt/uv-venvs` |
 
-More: [HAPPY-PATH.md](HAPPY-PATH.md), [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md), [Setup.md](Setup.md).
+More: [summary.md](summary.md) (the full workflow), [HAPPY-PATH.md](HAPPY-PATH.md), [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md), [Setup.md](Setup.md).
