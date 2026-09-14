@@ -16,7 +16,7 @@ install_system_tools() {
 
   # Update package list
   log_info "Updating package list..."
-  sudo apt-get update -qq
+  apt_update_quiet
 
   # Install tools
   log_info "Installing: build-essential, git, curl, wget, htop, jq, tree, vim"

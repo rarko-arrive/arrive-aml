@@ -1,217 +1,71 @@
 # Claude Code + Azure ML Skills Setup
 
-Quick reference for installing Claude Code and the azureml-skills library on Azure ML VMs.
+How Claude Code and the team skills library (`azureml-skills`) are installed on Azure ML VMs.
 
-## Prerequisites
+## TL;DR
 
-✅ Run `bash scripts/setup-vm.sh --all` first (installs Claude CLI and other tools)
-
-## Step 1: Install Claude Code Extension
-
-### In VS Code or Cursor:
-1. Open Extensions (Ctrl+Shift+X)
-2. Search for "Claude Code"
-3. Click Install
-4. Sign in with your Anthropic account
-
-### Via Command Line:
-```bash
-# VS Code
-code --install-extension anthropic.claude-code
-
-# Cursor  
-cursor --install-extension anthropic.claude-code
-```
-
-## Step 2: Register Azure ML Skills Marketplace
-
-Edit `~/.claude/plugins/known_marketplaces.json` and add:
-
-```json
-{
-  "claude-plugins-official": {
-    ...existing content if any...
-  },
-  "azureml-skills": {
-    "source": {
-      "source": "github",
-      "repo": "rarko-arrive/azureml-skills"
-    },
-    "installLocation": "/home/azureuser/.claude/plugins/marketplaces/azureml-skills",
-    "lastUpdated": "2026-09-11T00:00:00.000Z"
-  }
-}
-```
-
-**If file doesn't exist**, create it with just:
-```json
-{
-  "azureml-skills": {
-    "source": {
-      "source": "github",
-      "repo": "rarko-arrive/azureml-skills"
-    },
-    "installLocation": "/home/azureuser/.claude/plugins/marketplaces/azureml-skills",
-    "lastUpdated": "2026-09-11T00:00:00.000Z"
-  }
-}
-```
-
-## Step 3: Install the Main Skill
-
-In Claude Code (in your IDE), type:
+Everything below is done by `bash scripts/bootstrap.sh`. To (re)do just this part:
 
 ```bash
-/plugin install azureml-skills work-in-repo
+bash scripts/lib/install-claude.sh          # installs `claude` into ~/.local/bin if missing
+bash scripts/lib/install-claude-skills.sh   # clones/updates skills.conf repos, links skills
+claude auth login                           # once per VM (or: claude setup-token)
 ```
 
-Verify it's installed:
+## How skills are installed
+
+`skills.conf` lists skill repositories (`REPO_URL|NAME`). For each one the installer:
+
+1. clones it to `~/.claude/plugins/marketplaces/<NAME>` (OS disk, persists) or `git pull --ff-only`s it
+2. symlinks every `skills/<skill>/` that has a `SKILL.md` into `~/.claude/skills/<skill>`
+
+`azureml-skills` is a plugin repo with a `skills/` folder (not a marketplace), so this symlink
+approach is what makes `/work-in-repo` available. No JSON editing is needed.
+
 ```bash
-/plugin list
+ls -la ~/.claude/skills/
+# work-in-repo -> /home/azureuser/.claude/plugins/marketplaces/azureml-skills/skills/work-in-repo
 ```
 
-You should see: `work-in-repo (azureml-skills)`
+## Using it
 
-## Step 4: Start Using It!
+In Claude Code (`claude` in a terminal, or the Claude Code extension in Cursor/VS Code):
 
-### Basic Usage
-
-Open Claude Code and type:
-```bash
+```
 /work-in-repo
 ```
 
-Then tell Claude what you want to do:
-- "Add pytest infrastructure to this project"
-- "Create a new data processing module"
-- "Fix the bug in utils.py"
-- "Add type hints and docstrings to all functions"
+Then say what you want done. The skill works in `/mnt/mirror/<repo>`, creates a feature
+branch, makes the change, runs tests, commits with attribution, pushes, and saves the plan
+under `.ai/plans/`.
 
-### What Happens Automatically
+## Claude Code extension (Cursor / VS Code on your laptop)
 
-Claude will:
-1. ✅ Ensure repo is in SOT location (`~/cloudfiles/rarko/main/REPO/`)
-2. ✅ Create mirror worktree (`/mnt/mirror/REPO/`)
-3. ✅ Create feature branch
-4. ✅ Make your requested changes
-5. ✅ Run tests to verify
-6. ✅ Commit with proper message and attribution
-7. ✅ Push to GitHub
-8. ✅ Save detailed plan to `.ai/plans/cc-skill-work-in-repo-*.md`
-
-### Example Session
-
-```
-You: /work-in-repo
-
-Claude: What would you like to work on?
-
-You: Add pytest infrastructure with fixtures for Azure ML workspace testing
-
-Claude: I'll set up the mirror worktree and add pytest infrastructure...
-
-[Claude works...]
-
-✅ Done! Created:
-- tests/conftest.py with Azure ML fixtures
-- tests/test_example.py with sample tests
-- pytest.ini configuration
-- Updated pyproject.toml with test dependencies
-
-Committed and pushed to feature/add-pytest-infrastructure
-Plan saved to .ai/plans/cc-skill-work-in-repo-add-pytest-infrastructure.md
-```
-
-## Performance Benefits
-
-| Location | Git Status Time | Use For |
-|----------|----------------|---------|
-| `~/cloudfiles/rarko/main/REPO/` | 7-30 seconds | Backup only (SOT) |
-| `/mnt/mirror/REPO/` | <1 second | All development work |
-
-**Result**: 100x faster development workflow!
+Install the "Claude Code" extension in your **laptop** editor. When connected via Remote-SSH it
+uses the `claude` binary on the VM, so the VM-side install and login above are what matter.
 
 ## Troubleshooting
 
-### Skills not showing up
+| Problem | Fix |
+|---------|-----|
+| `/work-in-repo` not found | `bash scripts/lib/install-claude-skills.sh` then restart Claude Code |
+| `claude: command not found` | `bash scripts/lib/install-claude.sh && source ~/.bashrc` |
+| Not logged in | `claude auth login` (headless: open the URL on your laptop, paste the code) |
+| Skills repo out of date | `bash scripts/lib/install-claude-skills.sh` (does `git pull --ff-only`) |
+| Mirror worktree broken | `aml-bootstrap --restore` |
 
-```bash
-# Check marketplace registration
-cat ~/.claude/plugins/known_marketplaces.json | grep azureml-skills
+## Adding another skills repo
 
-# If not found, add it (see Step 2 above)
+Append to `skills.conf`:
 
-# Then reinstall
-/plugin install azureml-skills work-in-repo
+```
+git@github.com:rarko-arrive/another-skills.git|another-skills
 ```
 
-### Mirror worktree issues
-
-```bash
-# Reset mirror
-cd ~/cloudfiles/rarko/main/REPO
-git worktree remove --force /mnt/mirror/REPO
-rm -rf /mnt/mirror/REPO
-
-# Then use /work-in-repo again and it will recreate
-```
-
-### Claude CLI not found
-
-```bash
-# Reinstall Claude CLI
-bash scripts/setup-vm.sh --claude
-
-# Or manually
-curl -fsSL https://claude.ai/install.sh | sh
-```
-
-## Additional Skills (Coming Soon)
-
-- `/python-testing` - Setup pytest infrastructure
-- `/package-scaffolding` - Create proper Python package structure
-- `/env-validation` - Environment variable validation
-- `/azureml-jobs` - Azure ML job creation
-- `/data-pipelines` - Snowflake → processing workflows
+and run `bash scripts/lib/install-claude-skills.sh`.
 
 ## Resources
 
-- **Skills Library**: https://github.com/rarko-arrive/azureml-skills
-- **Worktree Pattern**: [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md)
-- **Claude Code Docs**: https://claude.ai/code
-- **Arrive AML Setup**: [README.md](README.md)
-
-## Quick Copy-Paste Blocks
-
-### Full Marketplace JSON (for ~/.claude/plugins/known_marketplaces.json)
-```json
-{
-  "azureml-skills": {
-    "source": {
-      "source": "github",
-      "repo": "rarko-arrive/azureml-skills"
-    },
-    "installLocation": "/home/azureuser/.claude/plugins/marketplaces/azureml-skills",
-    "lastUpdated": "2026-09-11T00:00:00.000Z"
-  }
-}
-```
-
-### Install Command
-```bash
-/plugin install azureml-skills work-in-repo
-```
-
-### Verify Command
-```bash
-/plugin list
-```
-
-### Use Command
-```bash
-/work-in-repo
-```
-
----
-
-**Questions?** Ask Rick Arko (@rarko) or check #data-science-infra on Slack.
+- Skills library: https://github.com/rarko-arrive/azureml-skills
+- Worktree pattern: [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md)
+- Setup: [README.md](README.md), [HAPPY-PATH.md](HAPPY-PATH.md)

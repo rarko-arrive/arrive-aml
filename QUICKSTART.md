@@ -1,168 +1,91 @@
-# Arrive AML - Quick Start Guide
+# Arrive AML - Quick Start
 
-## On a Fresh Azure ML VM
+One command turns a fresh Azure ML compute instance into the full Arrive data-science
+environment: tuned git, uv, GitHub CLI + SSH, Docker, Claude Code + team skills, every
+team repo cloned to persistent storage with a fast `/mnt/mirror` worktree and a local-disk
+uv venv.
+
+## Fresh VM (once)
+
+`~/cloudfiles/code/Users/<you>/` is an Azure Files share that every compute instance in the
+workspace mounts, so `arrive-aml` is usually already there. If it is not:
 
 ```bash
-# 1. Clone the repository
-git clone git@github.com:rarko-arrive/arrive-aml.git
-cd arrive-aml
+mkdir -p ~/cloudfiles/code/Users/$AML_USER/main   # AML_USER = your folder under Users/
+cd ~/cloudfiles/code/Users/$AML_USER/main
+git clone git@github.com:rarko-arrive/arrive-aml.git   # needs a GitHub SSH key: see below
+```
 
-# 2. Run setup (installs everything)
-bash scripts/setup-vm.sh --all
+Then, on the VM:
 
-# 3. Reload shell
+```bash
+bash ~/cloudfiles/code/Users/$AML_USER/main/arrive-aml/scripts/bootstrap.sh
 source ~/.bashrc
 ```
 
-**Done!** Your VM is now configured.
+**Done.** Work in `/mnt/mirror/<repo>` from now on.
 
-## Verify Everything Works
+> First time on GitHub from this VM? `bash scripts/setup-vm.sh --gh --github-ssh` creates
+> `~/.ssh/id_ed25519_github`, uploads it with `gh` (run `gh auth login` first) and verifies it.
 
-```bash
-# Check installation
-bash scripts/verify-setup.sh
+## After every VM stop/start
 
-# Test tools
-docker --version
-gh --version
-claude --version
-uv --version
-```
-
-## For Fast Git: Mirror Worktree Pattern (Recommended)
-
-Network-mounted storage is slow for git. Use the **persistent mirror worktree pattern**:
+`/mnt` is the ephemeral resource disk: mirrors and venvs are gone after a restart. Your
+commits are safe (they live in the SOT's `.git` on cloudfiles). Recreate in about a minute:
 
 ```bash
-# One-time setup: Create mirror on fast local disk
-cd ~/cloudfiles/rarko/main/arrive-aml  # Your SOT
-bash scripts/lib/setup-mirror-worktree.sh
-
-# Now always work in the mirror
-cd /mnt/mirror/arrive-aml  # ⚡ Fast local disk!
-
-# Git operations are <1s instead of 7-8s
-git status   # ⚡ Instant!
-git pull
-git checkout -b feature/my-feature
-
-# Do your work, commit, push - all fast!
-git add .
-git commit -m "Changes"
-git push origin feature/my-feature
-
-# Your changes are automatically in:
-# ✓ /mnt/mirror (fast local disk)
-# ✓ ~/cloudfiles (persistent, backed up)
-# ✓ Remote (GitHub)
+aml-bootstrap --restore
 ```
 
-**Why this pattern?**
-- `/mnt/mirror` = fast local disk that persists across VM restarts
-- Git worktree keeps it synced with persistent storage
-- No manual syncing needed - just commit and push!
+Your shell prints a reminder when `/mnt/mirror` is missing.
 
-**[📖 Read the complete guide →](docs/AZUREML-WORKTREE-PATTERN.md)**
-
-## Python Development
-
-After VM setup, configure Python environment:
+## Daily workflow
 
 ```bash
-# Run Python/uv bootstrap
-bash scripts/bootstrap-azureml.sh
-
-# This creates a fast local-disk virtual environment
-# and symlinks .venv to avoid slow network mounts
+cd /mnt/mirror/arrive-aml        # fast local disk, <1s git
+git checkout -b feature/thing    # branch, work, commit, push as usual
+uv run python script.py          # .venv -> /mnt/uv-venvs/arrive-aml
+claude                            # then /work-in-repo
 ```
 
-## Connect from Laptop (Cursor/VS Code)
+| Location | `git status` | Use for |
+|----------|--------------|---------|
+| `~/cloudfiles/code/Users/<you>/main/REPO` (SOT) | 7-30 s | Holds the `.git` database. Do not edit here. |
+| `/mnt/mirror/REPO` | <1 s | All development |
 
-On your **laptop** (not the VM):
+## Connect from your laptop (Cursor / VS Code)
+
+Editors are not installed on the VM: use Cursor or VS Code on your laptop with Remote-SSH.
+Their server component installs itself under `~/.cursor-server` / `~/.vscode-server` on first
+connect. On your **laptop**:
 
 ```bash
-# Configure SSH access to the VM
-bash scripts/setup-azureml-ssh.sh
-
-# Follow prompts:
-# - VM alias (e.g., rarko1)
-# - Public IP (from Azure portal)
-# - SSH port (usually 50000)
-# - .pem key path
+bash scripts/setup-azureml-ssh.sh      # adds the VM to ~/.ssh/config (asks for IP, port, .pem)
 ```
 
-Then in Cursor/VS Code: Remote-SSH → Connect to `rarko1`
+Then Remote-SSH -> `rarko1` -> open `/mnt/mirror/<repo>`.
 
-## Common Tasks
+## Adding repos and skills
 
-### Install Individual Tools
+- `repos.conf` - `REPO_URL|NAME|AUTO_MIRROR` per line, then `bash scripts/setup-repos.sh`
+- `skills.conf` - `REPO_URL|NAME` per line, then `bash scripts/lib/install-claude-skills.sh`
+
+## Verify / troubleshoot
 
 ```bash
-# Just git optimization and essentials
-bash scripts/setup-vm.sh --git-optimize --system-tools
-
-# Add Docker later
-bash scripts/lib/install-docker.sh
-
-# Add GitHub tools
-bash scripts/lib/install-gh.sh
-bash scripts/lib/configure-github-ssh.sh
+bash scripts/verify-setup.sh          # every failed check prints the exact fix
+bash scripts/bootstrap.sh --dry-run   # show the plan
 ```
 
-### Reuse SSH Key for New VMs
+Common fixes:
 
-Extract your public key:
-```bash
-ssh-keygen -y -f ~/.ssh/your-key.pem > ~/.ssh/your-key.pub
-cat ~/.ssh/your-key.pub  # Copy this
-```
+| Symptom | Fix |
+|---------|-----|
+| `git` slow | You are in the SOT. `cd /mnt/mirror/<repo>` |
+| `/mnt/mirror` missing | `aml-bootstrap --restore` |
+| GitHub SSH fails | `gh auth login` then `bash scripts/lib/configure-github-ssh.sh` |
+| `command not found` after install | `source ~/.bashrc` |
+| Docker permission denied | `newgrp docker` (or log out/in) |
+| OS disk full | old venvs in `~/uv-venvs/` can be deleted; venvs now live in `/mnt/uv-venvs` |
 
-Paste into Azure when creating the new VM (SSH settings → "Use existing public key")
-
-See [docs/REUSE-SSH-KEY.md](docs/REUSE-SSH-KEY.md) for details.
-
-## Troubleshooting
-
-### Git Still Slow?
-```bash
-# Verify config
-git config --global --list | grep -E 'fsmonitor|gc.auto'
-
-# Should see:
-#   core.fsmonitor=false
-#   gc.auto=0
-
-# Use worktree helper for truly fast git
-bash scripts/lib/worktree-helper.sh init
-```
-
-### Docker Permission Denied?
-```bash
-sudo usermod -aG docker $USER
-newgrp docker  # Or log out and back in
-```
-
-### Command Not Found?
-```bash
-source ~/.bashrc  # Or open new shell
-```
-
-### GitHub SSH Not Working?
-```bash
-# Authenticate gh CLI
-gh auth login
-
-# Or manually add key to GitHub
-cat ~/.ssh/id_ed25519_github.pub  # Copy this
-# Add at: https://github.com/settings/ssh/new
-```
-
-## Next Steps
-
-- Read full [README.md](README.md) for details
-- Check [Setup.md](Setup.md) for troubleshooting
-- Run `/help` in Claude Code for more options
-
----
-
-**Result**: Professional development environment in < 10 minutes ✨
+More: [HAPPY-PATH.md](HAPPY-PATH.md), [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md), [Setup.md](Setup.md).

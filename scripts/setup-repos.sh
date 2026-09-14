@@ -1,196 +1,170 @@
-#!/bin/bash
-# Setup all configured repositories with mirror worktrees
-# Reads repos.conf and clones/mirrors each repository
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+# Set up all configured repositories (idempotent)
+#   1. clone each repo from repos.conf into the SOT (~/cloudfiles/code/Users/<you>/main)
+#   2. create/repair its mirror worktree on /mnt/mirror  (AUTO_MIRROR=yes)
+#   3. create/refresh its uv venv on local disk + .venv symlink in the mirror
+#
+# Safe to re-run after every VM restart (/mnt is wiped on stop/start).
 
-# Source common utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/common.sh"
+# shellcheck source=scripts/lib/mirror.sh
+source "$SCRIPT_DIR/lib/mirror.sh"
 
-# Paths
-SOT_BASE="$HOME/cloudfiles/rarko/main"
-MIRROR_BASE="/mnt/mirror"
-REPOS_CONF="$SCRIPT_DIR/../repos.conf"
+REPOS_CONF="${ARRIVE_ROOT}/repos.conf"
+SKIP_MIRRORS=false
+SKIP_VENVS=false
+ONLY_REPO=""
 
-print_separator() {
-  echo "=================================================================="
+usage() {
+  cat <<USAGE
+Usage: bash scripts/setup-repos.sh [OPTIONS]
+
+Clone repos from repos.conf into the SOT, create mirror worktrees and venvs.
+
+Options:
+  --list          List repositories in repos.conf
+  --only NAME     Only process this repository
+  --skip-mirrors  Clone only (no /mnt/mirror worktrees, no venvs)
+  --skip-venvs    Do not create Python venvs
+  --help          Show this help
+
+Configuration: edit repos.conf (REPO_URL|REPO_NAME|AUTO_MIRROR)
+USAGE
+}
+
+read_repos() {
+  # prints: url name auto_mirror (whitespace-trimmed), skipping comments/blank lines
+  local url name mirror
+  while IFS='|' read -r url name mirror || [ -n "${url:-}" ]; do
+    url="$(trim "${url:-}")"
+    [ -z "$url" ] && continue
+    [[ "$url" == \#* ]] && continue
+    name="$(trim "${name:-}")"
+    mirror="$(trim "${mirror:-yes}")"
+    [ -n "$name" ] || name="$(basename "$url" .git)"
+    echo "$url $name $mirror"
+  done < "$REPOS_CONF"
+}
+
+list_repos() {
+  log_info "Configured repositories in repos.conf:"
+  echo
+  printf "%-50s %-20s %-8s\n" "Repository" "Name" "Mirror"
+  printf "%-50s %-20s %-8s\n" "----------" "----" "------"
+  read_repos | while read -r url name mirror; do
+    printf "%-50s %-20s %-8s\n" "$url" "$name" "$mirror"
+  done
+  echo
+}
+
+setup_one_repo() {
+  local url="$1" name="$2" auto_mirror="$3" sot_base="$4"
+  local sot_path="${sot_base}/${name}"
+  local mirror_path="${MIRROR_BASE}/${name}"
+
+  echo
+  log_info "Repository: $name"
+
+  # 1. clone into SOT
+  if [ -d "$sot_path/.git" ]; then
+    log_success "SOT present: $sot_path"
+  elif [ -e "$sot_path" ]; then
+    log_error "$sot_path exists but is not a git repository - move it aside and re-run"
+    return 1
+  else
+    log_info "Cloning $url -> $sot_path (network mount, one-time cost)..."
+    if ! git clone "$url" "$sot_path"; then
+      log_error "Clone failed for $name. Check GitHub SSH: bash scripts/lib/configure-github-ssh.sh"
+      return 1
+    fi
+    log_success "Cloned $name"
+  fi
+
+  [ "$auto_mirror" = "yes" ] || { log_info "AUTO_MIRROR=$auto_mirror - no mirror for $name"; return 0; }
+  [ "$SKIP_MIRRORS" = false ] || return 0
+
+  # 2. mirror worktree
+  ensure_mirror_worktree "$sot_path" "$mirror_path" || return 1
+
+  # 3. venv (only for Python projects)
+  if [ "$SKIP_VENVS" = false ] && [ -f "$mirror_path/pyproject.toml" ]; then
+    bash "$SCRIPT_DIR/lib/setup-python-venv.sh" "$mirror_path" || {
+      log_warn "venv setup failed for $name (continuing)"
+      return 1
+    }
+  fi
 }
 
 setup_repos() {
-  log_info "Setting up repositories from repos.conf"
-  echo
-
-  # Ensure base directories exist
-  mkdir -p "$SOT_BASE"
-
-  # Create /mnt/mirror if it doesn't exist
-  if [ ! -d "$MIRROR_BASE" ]; then
-    log_info "Creating $MIRROR_BASE directory..."
-    sudo mkdir -p "$MIRROR_BASE"
-    sudo chown "$USER:$USER" "$MIRROR_BASE"
-    log_success "/mnt/mirror created"
+  local sot_base
+  if ! sot_base="$(detect_sot_base)"; then
+    log_error "Could not determine the SOT base directory."
+    log_info "Expected layout: ~/cloudfiles/code/Users/<your-aml-user>/main/arrive-aml"
+    log_info "Clone arrive-aml there (or set ARRIVE_SOT_BASE) and re-run."
+    exit 1
   fi
 
-  # Check if repos.conf exists
   if [ ! -f "$REPOS_CONF" ]; then
     log_error "repos.conf not found at: $REPOS_CONF"
     exit 1
   fi
 
-  # Read repos.conf and process each repo
-  local clone_count=0
-  local mirror_count=0
-  local skip_count=0
+  print_separator
+  log_info "Setting up repositories"
+  log_info "  SOT base : $sot_base"
+  log_info "  Mirrors  : $MIRROR_BASE   (host: $(this_host))"
+  log_info "  venvs    : $UV_VENV_ROOT"
+  print_separator
 
-  while IFS='|' read -r repo_url repo_name auto_mirror || [ -n "$repo_url" ]; do
-    # Skip comments and empty lines
-    [[ "$repo_url" =~ ^#.*$ ]] && continue
-    [[ -z "$repo_url" ]] && continue
+  ensure_local_dir "$MIRROR_BASE"
 
-    # Trim whitespace
-    repo_url=$(echo "$repo_url" | xargs)
-    repo_name=$(echo "$repo_name" | xargs)
-    auto_mirror=$(echo "$auto_mirror" | xargs)
-
-    echo
-    log_info "Processing: $repo_name"
-
-    local sot_path="$SOT_BASE/$repo_name"
-    local mirror_path="$MIRROR_BASE/$repo_name"
-
-    # Clone to SOT if doesn't exist
-    if [ ! -d "$sot_path" ]; then
-      log_info "Cloning $repo_name to SOT..."
-      cd "$SOT_BASE"
-      if git clone "$repo_url" "$repo_name"; then
-        log_success "Cloned $repo_name"
-        ((clone_count++))
-      else
-        log_error "Failed to clone $repo_name"
-        continue
-      fi
+  local ok=0 failed=0 failed_names=()
+  while read -r url name mirror; do
+    if [ -n "$ONLY_REPO" ] && [ "$ONLY_REPO" != "$name" ]; then
+      continue
+    fi
+    if setup_one_repo "$url" "$name" "$mirror" "$sot_base"; then
+      ok=$((ok + 1))
     else
-      log_info "Repository already exists at SOT: $sot_path"
-      ((skip_count++))
+      failed=$((failed + 1))
+      failed_names+=("$name")
     fi
+  done < <(read_repos)
 
-    # Create mirror worktree if requested
-    if [ "$auto_mirror" = "yes" ]; then
-      if [ ! -d "$mirror_path" ]; then
-        log_info "Creating mirror worktree for $repo_name..."
-        cd "$sot_path"
-
-        # Check if worktree already registered
-        if git worktree list | grep -q "$mirror_path"; then
-          log_info "Worktree already registered, removing old entry..."
-          git worktree remove --force "$mirror_path" 2>/dev/null || true
-        fi
-
-        # Create worktree
-        if git worktree add "$mirror_path"; then
-          log_success "Mirror created: $mirror_path"
-          ((mirror_count++))
-        else
-          log_warn "Failed to create mirror for $repo_name"
-        fi
-      else
-        log_info "Mirror already exists: $mirror_path"
-      fi
-    fi
-
-  done < "$REPOS_CONF"
-
-  # Summary
   echo
   print_separator
-  log_success "Repository setup complete!"
+  if [ "$failed" -eq 0 ]; then
+    log_success "Repository setup complete ($ok repos)"
+  else
+    log_warn "Repository setup finished with problems: ${failed_names[*]}"
+  fi
   echo
-  echo "Summary:"
-  echo "  Cloned: $clone_count new repositories"
-  echo "  Mirrors: $mirror_count worktrees created"
-  echo "  Skipped: $skip_count existing repositories"
+  echo "Work in the mirrors (fast local disk):"
+  for d in "$MIRROR_BASE"/*/; do
+    [ -f "$d/.git" ] && echo "  cd $d"
+  done
   echo
-  echo "Locations:"
-  echo "  SOT (Source of Truth): $SOT_BASE"
-  echo "  Mirrors (Fast work):   $MIRROR_BASE"
-  echo
-  log_info "Work in mirrors for 100x faster git operations!"
-  echo
-  echo "Example:"
-  echo "  cd $MIRROR_BASE/arrive-aml"
-  echo "  git status  # <1 second!"
+  echo "After a VM restart (/mnt wiped):  aml-bootstrap --restore"
   print_separator
+  [ "$failed" -eq 0 ]
 }
 
-# Show usage
-usage() {
-  cat <<EOF
-Usage: $0 [OPTIONS]
-
-Setup all repositories from repos.conf with optional mirror worktrees.
-
-Options:
-  --help          Show this help message
-  --list          List repositories in repos.conf
-  --skip-mirrors  Clone repos but don't create mirror worktrees
-
-Examples:
-  $0                    # Setup all repos with mirrors
-  $0 --list             # Show configured repos
-  $0 --skip-mirrors     # Clone only, no mirrors
-
-Configuration:
-  Edit repos.conf to add/remove repositories
-EOF
-}
-
-# List repos from config
-list_repos() {
-  log_info "Configured repositories in repos.conf:"
-  echo
-  printf "%-40s %-20s %-10s\n" "Repository" "Name" "Mirror"
-  printf "%-40s %-20s %-10s\n" "----------" "----" "------"
-
-  while IFS='|' read -r repo_url repo_name auto_mirror || [ -n "$repo_url" ]; do
-    [[ "$repo_url" =~ ^#.*$ ]] && continue
-    [[ -z "$repo_url" ]] && continue
-
-    repo_url=$(echo "$repo_url" | xargs)
-    repo_name=$(echo "$repo_name" | xargs)
-    auto_mirror=$(echo "$auto_mirror" | xargs)
-
-    printf "%-40s %-20s %-10s\n" "$repo_url" "$repo_name" "$auto_mirror"
-  done < "$REPOS_CONF"
-  echo
-}
-
-# Main
 main() {
   check_not_root
-
-  case "${1:-}" in
-    --help)
-      usage
-      exit 0
-      ;;
-    --list)
-      list_repos
-      exit 0
-      ;;
-    --skip-mirrors)
-      log_warn "Skipping mirror creation (not implemented yet)"
-      setup_repos
-      ;;
-    "")
-      setup_repos
-      ;;
-    *)
-      log_error "Unknown option: $1"
-      usage
-      exit 1
-      ;;
-  esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --help|-h) usage; exit 0 ;;
+      --list) list_repos; exit 0 ;;
+      --only) ONLY_REPO="${2:-}"; shift ;;
+      --skip-mirrors) SKIP_MIRRORS=true ;;
+      --skip-venvs) SKIP_VENVS=true ;;
+      *) log_error "Unknown option: $1"; usage; exit 1 ;;
+    esac
+    shift
+  done
+  setup_repos
 }
 
 main "$@"

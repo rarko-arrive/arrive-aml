@@ -1,24 +1,25 @@
 # Arrive AML - Azure ML Development Environment Setup
 
-Professional, comprehensive setup for Azure ML compute instances. Transform a fresh VM into a fully-configured development environment with a single command.
+Professional, comprehensive setup for Azure ML compute instances. One command turns a fresh VM into a fully-configured data-science environment: tuned git, uv, GitHub CLI + SSH, Docker, Claude Code + team skills, and every team repo cloned to persistent storage with a fast `/mnt/mirror` worktree and a local-disk venv.
 
-**📖 [Quick Start →](QUICKSTART.md)** | **⚡ [Mirror Worktree Pattern →](docs/AZUREML-WORKTREE-PATTERN.md)** | **🔑 [Reuse SSH Keys →](docs/REUSE-SSH-KEY.md)**
+**📖 [Quick Start →](QUICKSTART.md)** | **🚶 [Happy Path →](HAPPY-PATH.md)** | **⚡ [Mirror Worktree Pattern →](docs/AZUREML-WORKTREE-PATTERN.md)** | **🔑 [Reuse SSH Keys →](docs/REUSE-SSH-KEY.md)**
 
 ## Quick Start
 
 ```bash
-# Clone this repository (or use existing clone)
-git clone git@github.com:arrive-logistics/arrive-aml.git
-cd arrive-aml
-
-# Run the setup script - installs everything
-bash scripts/setup-vm.sh --all
-
-# Log out and back in (or source bashrc)
+# On the compute instance. arrive-aml lives on the workspace file share, shared by all your VMs:
+bash ~/cloudfiles/code/Users/<you>/main/arrive-aml/scripts/bootstrap.sh
 source ~/.bashrc
 ```
 
-**That's it!** Your Azure ML VM is now configured with git optimization, development tools, and your preferred environment.
+**That's it.** Work in `/mnt/mirror/<repo>` from now on.
+
+```bash
+aml-bootstrap --restore      # after every VM stop/start: /mnt is ephemeral, this recreates mirrors + venvs
+bash scripts/verify-setup.sh # every failed check prints the exact fix
+```
+
+`bootstrap.sh` runs, in order: `setup-vm.sh --all` (tools), `lib/configure-shell.sh`, `setup-repos.sh` (SOT clones, mirrors, venvs), `lib/install-claude-skills.sh`, `verify-setup.sh`. Every script is idempotent and can be run on its own.
 
 ## What Gets Installed
 
@@ -30,10 +31,12 @@ source ~/.bashrc
 | **GitHub CLI** | gh command-line tool | `--gh` |
 | **GitHub SSH** | Automated SSH key setup for GitHub | `--github-ssh` |
 | **Docker** | Docker Engine + docker-compose | `--docker` |
-| **Claude CLI** | Anthropic Claude command-line interface | `--claude` |
-| **VS Code** | Visual Studio Code (code command) | `--vscode` |
-| **Cursor** | Cursor AI editor | `--cursor` |
+| **Claude Code** | Anthropic's Claude Code CLI (`claude`) + team skills from `skills.conf` | `--claude` |
+| **VS Code** | Checks the Remote-SSH server; the editor runs on your laptop | `--vscode` |
+| **Cursor** | Checks the Remote-SSH server; the editor runs on your laptop | `--cursor` |
 | **Conda Disable** | Disables conda auto-activation (preserves install) | `--disable-conda` |
+
+Beyond `setup-vm.sh`, `bootstrap.sh` also sets up repositories (`repos.conf`): SOT clone on cloudfiles, mirror worktree on `/mnt/mirror`, uv venv on `/mnt/uv-venvs` with a `.venv` symlink.
 
 ## Git Performance on Azure ML
 
@@ -46,16 +49,15 @@ source ~/.bashrc
 - 15+ other network-optimized settings
 - **Result**: `git status` 10-30s → **7-8s** (2-4x faster)
 
-**Solution 2 - Worktree Helper (Best)**: Work in fast local disk:
+**Solution 2 - Mirror Worktree (Best)**: work on fast local disk, commit into the persistent database:
 ```bash
-bash scripts/lib/worktree-helper.sh init  # Copy to /tmp
-cd /tmp/worktree-arrive-aml              # Work here
-# git status is now <1s (100x faster!)
-bash scripts/lib/worktree-helper.sh sync # Sync back when done
+cd /mnt/mirror/arrive-aml   # git worktree of ~/cloudfiles/.../arrive-aml/.git, created by bootstrap.sh
+git status                  # <1 second
 ```
-- **Result**: `git status` **<1 second** on local disk ⚡
+- **Result**: `git status` **<1 second** on local disk ⚡; commits land in the SOT's `.git` on cloudfiles immediately.
+- `/mnt` is Azure's ephemeral resource disk (wiped on stop/start). `aml-bootstrap --restore` recreates every mirror and venv in about a minute; only uncommitted edits can be lost.
 
-**Recommendation**: Use worktree helper for active development. The network mount is fundamentally limited by SMB/CIFS performance.
+**Recommendation**: Always work in `/mnt/mirror/<repo>`. Never edit in the SOT. See [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md).
 
 ## Prerequisites
 
@@ -114,7 +116,7 @@ bash scripts/setup-vm.sh --dry-run --all
 bash scripts/verify-setup.sh
 
 # Test git performance (should be < 1 second)
-cd ~/cloudfiles/code/Users/rarko/dev/arrive-aml
+cd /mnt/mirror/arrive-aml
 time git status
 ```
 
@@ -149,30 +151,79 @@ Test connection:
 ssh -T git@github.com
 ```
 
-### If You Installed Claude CLI
+### If You Installed Claude Code
 
-Configure with your API key:
+Sign in once per VM (works over SSH: open the URL on your laptop, paste the code back):
 
 ```bash
-claude configure
-# Get your API key from: https://console.anthropic.com/settings/keys
+claude auth login
 ```
+
+## Claude Code Skills Integration
+
+Enhance Claude Code with azureml-skills - a collection of skills optimized for the Azure ML mirror worktree workflow.
+
+### Step 1 + 2: Install the skills (done by bootstrap.sh)
+
+`skills.conf` lists skill repositories. The installer clones each one to `~/.claude/plugins/marketplaces/<name>` and symlinks every `skills/<skill>` into `~/.claude/skills/`:
+
+```bash
+bash scripts/lib/install-claude-skills.sh   # idempotent; also pulls updates
+```
+
+### Step 3: Use the Skill
+
+In any Claude Code conversation, invoke the skill:
+
+```
+/work-in-repo
+
+"I need to add error handling to the setup-vm.sh script"
+```
+
+**What it does:**
+- Automatically navigates to the fast `/mnt/mirror/` location
+- Handles git operations efficiently
+- Manages the SOT ↔ mirror workflow
+- Commits and syncs changes automatically
+
+### Verify Installation
+
+```bash
+ls -la ~/.claude/skills/     # work-in-repo -> .../azureml-skills/skills/work-in-repo
+```
+
+### Example Workflow
+
+```
+# In Claude Code chat:
+/work-in-repo
+
+"Update the README.md to add installation instructions 
+for the Docker setup, then commit the changes"
+```
+
+The skill will:
+1. Switch to `/mnt/mirror/arrive-aml` (fast disk)
+2. Make the requested changes
+3. Test with `git status` (<1 second!)
+4. Commit and push if requested
 
 ## Python Development Setup
 
-After the VM is configured, set up your Python environment:
+`bootstrap.sh` creates a uv venv for every mirrored repo that has a `pyproject.toml`. To (re)do one repo:
 
 ```bash
-# Run the Python/uv bootstrap
-bash scripts/bootstrap-azureml.sh
-
-# This creates a fast local-disk virtual environment and symlinks .venv
-# (Avoids slow cloudfiles mounts for Python packages)
+bash scripts/lib/setup-python-venv.sh /mnt/mirror/<repo>
+# venv: /mnt/uv-venvs/<repo>  (fast, big local disk)   .venv -> symlink in the repo (gitignored)
+# uv cache: /mnt/uv-cache     (UV_CACHE_DIR is exported by the bashrc block when it exists)
 ```
+
+Override locations in `~/.config/arrive-aml/env` (`UV_VENV_ROOT`, `ARRIVE_UV_CACHE_DIR`, `MIRROR_BASE`).
 
 ## SSH Access from Your Laptop
 
-To connect to this Azure ML VM from your laptop with Cursor Remote-SSH:
+Editors are not installed on the VM. Use Cursor or VS Code on your laptop with Remote-SSH; their server component installs itself under `~/.cursor-server` / `~/.vscode-server` on first connect. To configure your laptop:
 
 ```bash
 # On your laptop (not the VM), run:
@@ -186,18 +237,29 @@ This configures your laptop's `~/.ssh/config` with the VM's connection details.
 ```
 arrive-aml/
 ├── README.md                       # This file
+├── QUICKSTART.md / HAPPY-PATH.md   # One-page and step-by-step guides
 ├── Setup.md                        # Detailed troubleshooting guide
+├── repos.conf                      # Repos to clone + mirror (REPO_URL|NAME|AUTO_MIRROR)
+├── skills.conf                     # Claude Code skills repos (REPO_URL|NAME)
 ├── scripts/
-│   ├── setup-vm.sh                 # Master setup orchestrator
-│   ├── verify-setup.sh             # Verification script
-│   ├── bootstrap-azureml.sh        # Python environment setup
-│   ├── setup-azureml-ssh.sh        # Laptop SSH configuration
-│   └── lib/                        # Modular installers
-│       ├── common.sh               # Shared utilities
-│       ├── configure-git.sh        # Git performance optimization
-│       ├── configure-github-ssh.sh # GitHub SSH setup
-│       ├── disable-conda.sh        # Conda management
-│       ├── install-*.sh            # Tool-specific installers
+│   ├── bootstrap.sh                # THE one command: tools + shell + repos + skills + verify (--restore after restart)
+│   ├── setup-vm.sh                 # Tools orchestrator (--all)
+│   ├── setup-repos.sh              # SOT clones, /mnt/mirror worktrees, uv venvs
+│   ├── verify-setup.sh             # Verification (required vs optional, prints fixes)
+│   ├── bootstrap-azureml.sh        # Python venv for this repo only (wrapper)
+│   ├── setup-azureml-ssh.sh        # Laptop-side SSH configuration
+│   └── lib/                        # Modular, idempotent pieces
+│       ├── common.sh               # Logging, path detection, GitHub helpers
+│       ├── mirror.sh               # Mirror worktree logic (per-host locks, stale cleanup)
+│       ├── configure-git.sh        # Git performance + safe.directory
+│       ├── configure-github-ssh.sh # GitHub SSH key/config/upload/test
+│       ├── configure-shell.sh      # bashrc block, ~/.config/arrive-aml/env, aml-bootstrap
+│       ├── setup-python-venv.sh    # uv venv on /mnt/uv-venvs + .venv symlink
+│       ├── setup-mirror-worktree.sh# Mirror for one repo
+│       ├── install-claude.sh       # Claude Code CLI
+│       ├── install-claude-skills.sh# Team skills -> ~/.claude/skills
+│       ├── install-*.sh            # uv, gh, docker, system tools, editor server checks
+│       └── disable-conda.sh        # Conda management
 ├── pyproject.toml                  # Python project configuration
 ├── .env.example                    # Environment template
 └── .vscode/                        # VS Code/Cursor settings
@@ -207,18 +269,17 @@ arrive-aml/
 
 ### Git Still Slow?
 
+You are probably in the SOT on cloudfiles. Work in the mirror:
+
 ```bash
-# Verify git config
-git config --global --list | grep -E 'core\.fsmonitor|gc\.auto|feature\.manyFiles'
-
-# Should see:
-#   core.fsmonitor=false
-#   gc.auto=0
-#   feature.manyfiles=true
-
-# Re-run git optimization if needed
-bash scripts/lib/configure-git.sh
+cd /mnt/mirror/<repo>            # <1s git
+aml-bootstrap --restore          # if /mnt/mirror is missing (VM restarted)
+bash scripts/lib/configure-git.sh  # re-apply the network-mount git settings
 ```
+
+### Mirror missing or broken after a restart
+
+`/mnt` is the ephemeral resource disk. `aml-bootstrap --restore` recreates every mirror and venv; a broken mirror directory is moved to `<mirror>.broken-<timestamp>` so nothing is lost.
 
 ### Docker Permission Denied?
 
@@ -264,12 +325,19 @@ bash scripts/lib/install-uv.sh
 bash scripts/lib/install-gh.sh
 bash scripts/lib/install-docker.sh
 bash scripts/lib/install-claude.sh
-bash scripts/lib/install-vscode.sh
-bash scripts/lib/install-cursor.sh
+bash scripts/lib/install-claude-skills.sh
+bash scripts/lib/install-vscode.sh    # --desktop to force the apt package (needs a display)
+bash scripts/lib/install-cursor.sh    # --appimage to force the AppImage (needs a display)
 
 # Configurations
 bash scripts/lib/configure-github-ssh.sh
+bash scripts/lib/configure-shell.sh
 bash scripts/lib/disable-conda.sh
+
+# Repositories
+bash scripts/setup-repos.sh --only arrive-ds          # one repo: clone + mirror + venv
+bash scripts/lib/setup-mirror-worktree.sh arrive-ds   # just the mirror
+bash scripts/lib/setup-python-venv.sh /mnt/mirror/arrive-ds
 ```
 
 ## Configuration Options
@@ -285,10 +353,11 @@ All flags for `setup-vm.sh`:
 --github-ssh       GitHub SSH authentication
 --disable-conda    Disable conda auto-activation
 --docker           Docker Engine + docker-compose
---claude           Claude CLI
---vscode           Visual Studio Code
---cursor           Cursor Editor
+--claude           Claude Code CLI
+--vscode           VS Code Remote-SSH server check
+--cursor           Cursor Remote-SSH server check
 --dry-run          Show what would be installed
+--no-verify        Skip verification (bootstrap.sh runs it itself)
 -h, --help         Show help message
 ```
 
@@ -312,13 +381,14 @@ This setup solves all of these, providing a **professional, performant developme
 
 ## Maintenance
 
-Re-run the setup script anytime to update or add tools:
+Re-run the bootstrap anytime to update tools, pull new repos from `repos.conf`, or refresh skills:
 
 ```bash
-bash scripts/setup-vm.sh --all
+aml-bootstrap              # full
+aml-bootstrap --restore    # after a VM stop/start
 ```
 
-The scripts are **idempotent** - safe to run multiple times.
+The scripts are **idempotent** - safe to run multiple times. Logs: `~/.local/state/arrive-aml/`.
 
 ---
 

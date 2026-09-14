@@ -4,6 +4,26 @@
 
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Paths and defaults (override via ~/.config/arrive-aml/env or the environment)
+# ---------------------------------------------------------------------------
+ARRIVE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ARRIVE_CONFIG_DIR="${ARRIVE_CONFIG_DIR:-${HOME}/.config/arrive-aml}"
+ARRIVE_ENV_FILE="${ARRIVE_CONFIG_DIR}/env"
+ARRIVE_STATE_DIR="${HOME}/.local/state/arrive-aml"
+
+# shellcheck disable=SC1090
+[ -f "$ARRIVE_ENV_FILE" ] && source "$ARRIVE_ENV_FILE"
+
+# Fast local disk. NOTE: on Azure ML compute instances /mnt is the EPHEMERAL
+# resource disk - it is wiped on every stop/start. Everything placed there must
+# be reproducible with `scripts/bootstrap.sh --restore`.
+: "${MIRROR_BASE:=/mnt/mirror}"
+: "${UV_VENV_ROOT:=/mnt/uv-venvs}"
+: "${ARRIVE_UV_CACHE_DIR:=/mnt/uv-cache}"
+# Where Claude Code skills repos are cloned (OS disk - persists)
+: "${CLAUDE_SKILLS_CLONE_DIR:=${HOME}/.claude/plugins/marketplaces}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -54,7 +74,6 @@ add_to_path() {
 
   # Check if already in .bashrc
   if grep -qF "$dir" "${HOME}/.bashrc" 2>/dev/null; then
-    log_info "$dir already in ~/.bashrc"
     return 0
   fi
 
@@ -108,7 +127,169 @@ is_ubuntu() {
   [ "$(get_os_info)" = "ubuntu" ]
 }
 
+# Trim leading/trailing whitespace (pure bash - xargs breaks on apostrophes)
+trim() {
+  local v="$*"
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  printf '%s' "$v"
+}
+
 # Print separator line
 print_separator() {
   echo "=================================================================="
+}
+
+# ---------------------------------------------------------------------------
+# Azure ML environment helpers
+# ---------------------------------------------------------------------------
+
+# True on an Azure ML compute instance
+is_azureml() {
+  [ -f "${HOME}/cloudfiles/.nbvm" ] || [ -d /mnt/azmnt ] || [ -d "${HOME}/cloudfiles/code/Users" ]
+}
+
+# True when there is no graphical display (always the case on a compute instance)
+is_headless() {
+  [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]
+}
+
+# Stable name of this compute instance (used to tag per-host git worktrees)
+this_host() {
+  local name=""
+  if [ -f "${HOME}/cloudfiles/.nbvm" ]; then
+    name="$(sed -n 's/^instance=//p' "${HOME}/cloudfiles/.nbvm" | head -n1)"
+  fi
+  [ -n "$name" ] || name="$(hostname -s 2>/dev/null || hostname)"
+  echo "$name"
+}
+
+# Create a directory on a root-owned parent (e.g. /mnt) and hand it to the user.
+# Usage: ensure_local_dir /mnt/mirror
+ensure_local_dir() {
+  local dir="$1"
+  if [ -d "$dir" ]; then
+    if [ ! -w "$dir" ]; then
+      sudo chown "$USER:$USER" "$dir"
+    fi
+    return 0
+  fi
+  if mkdir -p "$dir" 2>/dev/null; then
+    return 0
+  fi
+  sudo mkdir -p "$dir"
+  sudo chown "$USER:$USER" "$dir"
+}
+
+# Rewrite a resolved cloudfiles path back to the stable ~/cloudfiles form.
+# /mnt/batch/tasks/shared/LS_root/mounts/clusters/HOST/code/Users/x -> ~/cloudfiles/code/Users/x
+stable_cloudfiles_path() {
+  local p="$1"
+  case "$p" in
+    */mounts/clusters/*/code/*)
+      local rest="${p#*/mounts/clusters/*/code/}"
+      local candidate="${HOME}/cloudfiles/code/${rest}"
+      if [ -e "$candidate" ]; then
+        echo "$candidate"
+        return 0
+      fi
+      ;;
+  esac
+  echo "$p"
+}
+
+# Source-of-truth base directory: the directory that holds all SOT repos
+# (~/cloudfiles/code/Users/<aml-user>/main). Derived from where THIS arrive-aml
+# checkout's git database lives, so it works from the SOT and from a mirror.
+# Override with ARRIVE_SOT_BASE.
+detect_sot_base() {
+  if [ -n "${ARRIVE_SOT_BASE:-}" ]; then
+    echo "$ARRIVE_SOT_BASE"
+    return 0
+  fi
+
+  local common sot_repo
+  common="$(git -C "$ARRIVE_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [ -n "$common" ]; then
+    sot_repo="$(dirname "$common")"
+    case "$sot_repo" in
+      */code/Users/*)
+        stable_cloudfiles_path "$(dirname "$sot_repo")"
+        return 0
+        ;;
+    esac
+  fi
+
+  # Fallback: a single user directory under cloudfiles that already has main/
+  local users_dir="${HOME}/cloudfiles/code/Users"
+  if [ -d "$users_dir" ]; then
+    local candidates=()
+    local d
+    for d in "$users_dir"/*/main; do
+      [ -d "$d/arrive-aml" ] && candidates+=("$d")
+    done
+    if [ "${#candidates[@]}" -eq 1 ]; then
+      echo "${candidates[0]}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# Wait for a path to appear (cloudfiles can mount late during VM start-up)
+wait_for_path() {
+  local path="$1"
+  local timeout="${2:-300}"
+  local waited=0
+  while [ ! -e "$path" ]; do
+    if [ "$waited" -ge "$timeout" ]; then
+      return 1
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  return 0
+}
+
+# Run apt-get update, hiding the noisy duplicate-source warnings the Azure ML
+# image ships with (real errors still print).
+apt_update_quiet() {
+  sudo apt-get update -qq 2> >(grep -Ev '^W: ' >&2 || true)
+}
+
+# ---------------------------------------------------------------------------
+# GitHub helpers
+# ---------------------------------------------------------------------------
+
+# Make sure github.com host keys are trusted (fresh VMs have no known_hosts).
+# Fetches fingerprints over HTTPS from the GitHub API; falls back to ssh-keyscan.
+ensure_github_known_hosts() {
+  local known="${HOME}/.ssh/known_hosts"
+  mkdir -p "${HOME}/.ssh"
+  chmod 700 "${HOME}/.ssh"
+  touch "$known"
+  if ssh-keygen -F github.com -f "$known" >/dev/null 2>&1; then
+    return 0
+  fi
+  local keys
+  keys="$(curl -fsSL --max-time 15 https://api.github.com/meta 2>/dev/null \
+    | (command -v jq >/dev/null 2>&1 && jq -r '.ssh_keys[]' || sed -n 's/.*"\(ssh-[a-z0-9-]* [A-Za-z0-9+/=]*\)".*/\1/p') || true)"
+  if [ -n "$keys" ]; then
+    while IFS= read -r k; do
+      [ -n "$k" ] && echo "github.com $k" >> "$known"
+    done <<< "$keys"
+  else
+    ssh-keyscan -T 10 github.com >> "$known" 2>/dev/null || true
+  fi
+  ssh-keygen -F github.com -f "$known" >/dev/null 2>&1
+}
+
+# GitHub SSH test that is immune to `set -o pipefail`.
+# GitHub always exits 1 on `ssh -T` (no shell access), so grep on the message.
+# Sets GITHUB_SSH_OUTPUT for callers that want to show the reason on failure.
+github_ssh_ok() {
+  GITHUB_SSH_OUTPUT="$(ssh -T -o BatchMode=yes -o ConnectTimeout=15 \
+    -o StrictHostKeyChecking=accept-new git@github.com 2>&1 || true)"
+  [[ "$GITHUB_SSH_OUTPUT" == *"successfully authenticated"* ]]
 }

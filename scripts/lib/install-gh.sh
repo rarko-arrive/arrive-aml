@@ -37,7 +37,7 @@ install_gh() {
 
   # Update and install
   log_info "Installing gh..."
-  sudo apt-get update -qq
+  apt_update_quiet
   sudo apt-get install -y -qq gh
 
   if ! command -v gh >/dev/null 2>&1; then

@@ -4,7 +4,9 @@ This guide explains how to configure which repositories are automatically cloned
 
 ## Overview
 
-The `repos.conf` file defines a list of repositories to clone to the Source of Truth location (`~/cloudfiles/rarko/main/`) and optionally create mirror worktrees in `/mnt/mirror/` for fast git operations.
+The `repos.conf` file defines a list of repositories to clone to the Source of Truth location (`~/cloudfiles/code/Users/<you>/main/`, derived from where arrive-aml itself lives) and optionally create mirror worktrees in `/mnt/mirror/` for fast git operations plus a uv venv on `/mnt/uv-venvs/` for repos with a `pyproject.toml`.
+
+`scripts/bootstrap.sh` runs `setup-repos.sh` for you; `aml-bootstrap --restore` re-runs it after a VM restart.
 
 ## File Format
 
@@ -35,14 +37,16 @@ git@github.com:rarko-arrive/data-pipelines.git|data-pipelines|no
 ### Setup All Repos
 
 ```bash
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 bash scripts/setup-repos.sh
 ```
 
 This will:
-1. Clone each repo to `~/cloudfiles/rarko/main/REPO_NAME/`
-2. Create mirror worktree at `/mnt/mirror/REPO_NAME/` (if `AUTO_MIRROR=yes`)
-3. Skip repos that already exist
+1. Clone each repo to `~/cloudfiles/code/Users/<you>/main/REPO_NAME/` (skipped if present)
+2. Create or repair the mirror worktree at `/mnt/mirror/REPO_NAME/` (if `AUTO_MIRROR=yes`)
+3. `uv sync` into `/mnt/uv-venvs/REPO_NAME` and symlink `.venv` in the mirror (if `pyproject.toml` exists)
+
+Options: `--only NAME` (one repo), `--skip-venvs`, `--skip-mirrors`, `--list`.
 
 ### List Configured Repos
 
@@ -58,13 +62,19 @@ Shows all repos configured in `repos.conf`.
 bash scripts/setup-repos.sh --skip-mirrors
 ```
 
-Clones repos to SOT but doesn't create mirror worktrees.
+Clones repos to SOT but doesn't create mirror worktrees or venvs.
+
+### One Repo Only
+
+```bash
+bash scripts/setup-repos.sh --only arrive-ds
+```
 
 ## Adding Your Own Repos
 
 1. **Edit repos.conf**:
    ```bash
-   cd ~/cloudfiles/rarko/main/arrive-aml
+   cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
    vim repos.conf
    ```
 
@@ -107,7 +117,7 @@ Mirror worktrees provide **100x faster git operations**:
 
 | Location | Git Status Time | Use For |
 |----------|----------------|---------|
-| `~/cloudfiles/rarko/main/REPO/` | 7-30 seconds | Backup (SOT) |
+| `~/cloudfiles/code/Users/rarko/main/REPO/` | 7-30 seconds | Backup (SOT) |
 | `/mnt/mirror/REPO/` | <1 second | Development |
 
 **How it works:**
@@ -121,7 +131,7 @@ Mirror worktrees provide **100x faster git operations**:
 After running `setup-repos.sh`:
 
 ```
-~/cloudfiles/rarko/main/
+~/cloudfiles/code/Users/rarko/main/
 ├── arrive-aml/              ← SOT
 ├── azureml-skills/          ← SOT
 └── arrive-ds/               ← SOT
@@ -142,8 +152,8 @@ Add to your VM setup workflow:
 
 ```bash
 # 1. Clone arrive-aml
-git clone git@github.com:rarko-arrive/arrive-aml.git ~/cloudfiles/rarko/main/arrive-aml
-cd ~/cloudfiles/rarko/main/arrive-aml
+git clone git@github.com:rarko-arrive/arrive-aml.git ~/cloudfiles/code/Users/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 
 # 2. Run VM setup
 bash scripts/setup-vm.sh --all
@@ -157,8 +167,8 @@ bash scripts/setup-repos.sh
 Share this one-liner:
 
 ```bash
-git clone git@github.com:rarko-arrive/arrive-aml.git ~/cloudfiles/rarko/main/arrive-aml && \
-cd ~/cloudfiles/rarko/main/arrive-aml && \
+git clone git@github.com:rarko-arrive/arrive-aml.git ~/cloudfiles/code/Users/rarko/main/arrive-aml && \
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml && \
 bash scripts/setup-vm.sh --all && \
 bash scripts/setup-repos.sh
 ```
@@ -171,7 +181,7 @@ The script skips existing repositories. To re-clone:
 
 ```bash
 # Remove and re-run
-rm -rf ~/cloudfiles/rarko/main/REPO_NAME
+rm -rf ~/cloudfiles/code/Users/rarko/main/REPO_NAME
 bash scripts/setup-repos.sh
 ```
 
@@ -179,7 +189,7 @@ bash scripts/setup-repos.sh
 
 ```bash
 # Remove and recreate mirror
-cd ~/cloudfiles/rarko/main/REPO_NAME
+cd ~/cloudfiles/code/Users/rarko/main/REPO_NAME
 git worktree remove --force /mnt/mirror/REPO_NAME
 rm -rf /mnt/mirror/REPO_NAME
 git worktree add /mnt/mirror/REPO_NAME

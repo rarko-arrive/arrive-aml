@@ -27,7 +27,7 @@ echo
 
 # Test 2: Check SSH to GitHub
 echo -e "${BLUE}Test 2: GitHub SSH connection${NC}"
-if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+if ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new git@github.com 2>&1 | grep -q "successfully authenticated"; then
     echo -e "${GREEN}✅ GitHub SSH working${NC}"
 else
     echo -e "${YELLOW}⚠️  GitHub SSH not working${NC}"
@@ -52,16 +52,16 @@ echo
 # Test 4: Check if repo is in canonical location
 echo -e "${BLUE}Test 4: Repository location${NC}"
 CURRENT_DIR=$(pwd)
-if [[ "$CURRENT_DIR" == *"/cloudfiles/rarko/main/arrive-aml"* ]]; then
+if [[ "$CURRENT_DIR" == *"/code/Users/"*"/main/arrive-aml"* ]]; then
     echo -e "${GREEN}✅ Repository in canonical location${NC}"
 else
     echo -e "${YELLOW}⚠️  Repository not in canonical location${NC}"
     echo "Current: $CURRENT_DIR"
-    echo "Expected: ~/cloudfiles/rarko/main/arrive-aml"
+    echo "Expected: ~/cloudfiles/code/Users/rarko/main/arrive-aml"
     echo
     echo "To move:"
-    echo "  mkdir -p ~/cloudfiles/rarko/main"
-    echo "  mv $CURRENT_DIR ~/cloudfiles/rarko/main/"
+    echo "  mkdir -p ~/cloudfiles/code/Users/rarko/main"
+    echo "  mv $CURRENT_DIR ~/cloudfiles/code/Users/rarko/main/"
 fi
 echo
 

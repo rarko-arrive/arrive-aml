@@ -1,176 +1,229 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Verify Arrive AML VM setup
-# Checks that all installed tools are working correctly
+# Verify the Arrive AML VM setup
+# Required checks fail the script (exit 1) and print the exact fix.
+# Optional checks only inform (editors are used from your laptop via Remote-SSH).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/lib"
+# shellcheck source=scripts/lib/mirror.sh
+source "$SCRIPT_DIR/lib/mirror.sh"
 
-# shellcheck source=scripts/lib/common.sh
-source "$LIB_DIR/common.sh"
+FAILED=()   # "what|fix"
+NOTES=()
 
-FAILED_CHECKS=()
+fail() { log_warn "$1"; FAILED+=("$1|$2"); }
+note() { log_info "  $1"; NOTES+=("$1"); }
 
 check_command() {
-  local cmd="$1"
-  local name="$2"
-
+  local cmd="$1" name="$2" fix="$3"
   if command -v "$cmd" >/dev/null 2>&1; then
-    log_success "$name: $(command -v $cmd)"
+    log_success "$name: $(command -v "$cmd")"
     return 0
+  fi
+  fail "$name: NOT FOUND" "$fix"
+  return 1
+}
+
+check_command_optional() {
+  local cmd="$1" name="$2"
+  if command -v "$cmd" >/dev/null 2>&1; then
+    log_success "$name: $(command -v "$cmd")"
   else
-    log_warn "$name: NOT FOUND"
-    FAILED_CHECKS+=("$name")
-    return 1
+    note "$name: not installed (optional)"
   fi
 }
 
 check_git_config() {
-  local key="$1"
-  local expected="$2"
-  local name="$3"
-
+  local key="$1" expected="$2"
   local actual
-  actual=$(git config --global --get "$key" 2>/dev/null || echo "")
-
+  actual="$(git config --global --get "$key" 2>/dev/null || echo "")"
   if [ "$actual" = "$expected" ]; then
-    log_success "$name: $actual"
-    return 0
+    log_success "$key = $actual"
   else
-    log_warn "$name: $actual (expected: $expected)"
-    FAILED_CHECKS+=("Git config: $name")
-    return 1
+    fail "$key = '${actual:-unset}' (expected $expected)" "bash scripts/lib/configure-git.sh"
   fi
 }
 
 main() {
-  log_info "Verifying Arrive AML VM Setup"
+  export PATH="${HOME}/.local/bin:${PATH}"
+  log_info "Verifying Arrive AML VM Setup ($(this_host))"
   echo
 
   log_info "=== System Tools ==="
-  check_command git "Git"
-  check_command curl "curl"
-  check_command wget "wget"
-  check_command htop "htop"
-  check_command jq "jq"
-  check_command tree "tree"
-  echo
-
-  log_info "=== Package Managers ==="
-  check_command uv "uv"
-  if command -v uv >/dev/null 2>&1; then
-    log_info "  Version: $(uv --version)"
-  fi
-  echo
-
-  log_info "=== GitHub Tools ==="
-  check_command gh "GitHub CLI"
-  if command -v gh >/dev/null 2>&1; then
-    log_info "  Version: $(gh --version | head -n1)"
-    if gh auth status >/dev/null 2>&1; then
-      log_success "  Authenticated"
-    else
-      log_warn "  Not authenticated (run: gh auth login)"
-    fi
-  fi
-
-  # Check GitHub SSH
-  if [ -f "${HOME}/.ssh/id_ed25519_github" ]; then
-    log_success "GitHub SSH key exists"
-    if ssh -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
-      log_success "GitHub SSH connection works"
-    else
-      log_warn "GitHub SSH connection failed"
-      FAILED_CHECKS+=("GitHub SSH")
-    fi
-  else
-    log_warn "GitHub SSH key not found"
-  fi
-  echo
-
-  log_info "=== Docker ==="
-  check_command docker "Docker"
-  if command -v docker >/dev/null 2>&1; then
-    log_info "  Version: $(docker --version)"
-    if groups | grep -q docker; then
-      log_success "  User in docker group"
-    else
-      log_warn "  User NOT in docker group (run: sudo usermod -aG docker $USER)"
-      FAILED_CHECKS+=("Docker group")
-    fi
-  fi
-
-  check_command docker-compose "docker-compose"
-  if command -v docker-compose >/dev/null 2>&1; then
-    log_info "  Version: $(docker-compose --version)"
-  fi
-  echo
-
-  log_info "=== Development Tools ==="
-  check_command claude "Claude CLI"
-  if command -v claude >/dev/null 2>&1; then
-    log_info "  Version: $(claude --version 2>/dev/null || echo 'installed')"
-  fi
-
-  check_command code "VS Code"
-  if command -v code >/dev/null 2>&1; then
-    log_info "  Version: $(code --version | head -n1)"
-  fi
-
-  check_command cursor "Cursor"
+  check_command git "Git" "bash scripts/lib/install-system-tools.sh" || true
+  check_command curl "curl" "bash scripts/lib/install-system-tools.sh" || true
+  check_command_optional jq "jq"
+  check_command_optional htop "htop"
+  check_command_optional tree "tree"
   echo
 
   log_info "=== Git Configuration ==="
-  if command -v git >/dev/null 2>&1; then
-    check_git_config "core.fsmonitor" "false" "core.fsmonitor"
-    check_git_config "core.untrackedCache" "true" "core.untrackedCache"
-    check_git_config "feature.manyFiles" "true" "feature.manyFiles"
-    check_git_config "gc.auto" "0" "gc.auto"
-    check_git_config "user.name" "Rick Arko" "user.name"
-    check_git_config "user.email" "rarko@arrivelogistics.com" "user.email"
+  check_git_config core.fsmonitor false
+  check_git_config feature.manyFiles true
+  check_git_config gc.auto 0
+  check_git_config core.ignoreStat false
+  if git config --global --get-all safe.directory 2>/dev/null | grep -qx '\*'; then
+    log_success "safe.directory = * (cloudfiles mount is root-owned)"
+  else
+    fail "safe.directory '*' missing (git refuses root-owned cloudfiles repos)" "bash scripts/lib/configure-git.sh"
+  fi
+  if [ -n "$(git config --global user.email 2>/dev/null)" ]; then
+    log_success "user: $(git config --global user.name) <$(git config --global user.email)>"
+  else
+    fail "git user.email not set" "git config --global user.email you@arrivelogistics.com"
   fi
   echo
 
-  log_info "=== Conda ==="
-  if command -v conda >/dev/null 2>&1; then
-    local auto_activate
-    auto_activate=$(conda config --get auto_activate_base 2>/dev/null | grep -o 'True\|False' || echo "unknown")
-    if [ "$auto_activate" = "False" ]; then
-      log_success "Conda auto-activation: disabled"
+  log_info "=== Package Managers ==="
+  if check_command uv "uv" "bash scripts/lib/install-uv.sh"; then
+    log_info "  $(uv --version)"
+  fi
+  echo
+
+  log_info "=== GitHub ==="
+  if check_command gh "GitHub CLI" "bash scripts/lib/install-gh.sh"; then
+    if gh auth status >/dev/null 2>&1; then
+      log_success "gh authenticated"
     else
-      log_warn "Conda auto-activation: $auto_activate"
+      fail "gh not authenticated" "gh auth login"
+    fi
+  fi
+  if [ -f "${HOME}/.ssh/id_ed25519_github" ]; then
+    log_success "GitHub SSH key exists"
+    if github_ssh_ok; then
+      log_success "GitHub SSH works ($(echo "$GITHUB_SSH_OUTPUT" | head -n1))"
+    else
+      fail "GitHub SSH failed: $(echo "$GITHUB_SSH_OUTPUT" | head -n1)" "bash scripts/lib/configure-github-ssh.sh"
     fi
   else
-    log_info "Conda: not installed"
+    fail "GitHub SSH key missing" "bash scripts/lib/configure-github-ssh.sh"
   fi
   echo
 
-  log_info "=== Python Environment ==="
-  if [ -f "${HOME}/.local/bin/uv" ]; then
-    log_success "uv in ~/.local/bin"
-  fi
-
-  if [ -d "${HOME}/uv-venvs" ]; then
-    log_success "uv-venvs directory exists: ${HOME}/uv-venvs"
+  log_info "=== Docker (optional) ==="
+  if command -v docker >/dev/null 2>&1; then
+    log_success "Docker: $(docker --version)"
+    if id -nG | grep -qw docker; then
+      log_success "user in docker group"
+    else
+      note "user not in docker group (run: sudo usermod -aG docker \$USER, then re-login)"
+    fi
+  else
+    note "Docker not installed (bash scripts/lib/install-docker.sh)"
   fi
   echo
 
-  # Summary
+  log_info "=== Claude Code ==="
+  if check_command claude "Claude Code" "bash scripts/lib/install-claude.sh"; then
+    log_info "  $(claude --version 2>/dev/null || echo installed)"
+    if claude auth status >/dev/null 2>&1; then
+      log_success "Claude Code authenticated"
+    else
+      note "Claude Code not authenticated (run: claude auth login)"
+    fi
+  fi
+  local skills_dir="${HOME}/.claude/skills" s broken=0 count=0
+  if [ -d "$skills_dir" ]; then
+    for s in "$skills_dir"/*; do
+      [ -e "$s" ] || { [ -L "$s" ] && broken=$((broken + 1)); continue; }
+      count=$((count + 1))
+    done
+  fi
+  if [ -f "${ARRIVE_ROOT}/skills.conf" ] && grep -qvE '^\s*(#|$)' "${ARRIVE_ROOT}/skills.conf"; then
+    if [ "$count" -gt 0 ] && [ "$broken" -eq 0 ]; then
+      log_success "Claude skills linked: $(ls "$skills_dir" | tr '\n' ' ')"
+    else
+      fail "Claude skills missing or broken ($count ok, $broken broken)" "bash scripts/lib/install-claude-skills.sh"
+    fi
+  fi
+  echo
+
+  log_info "=== Editors (used from your laptop via Remote-SSH) ==="
+  if ls -d "${HOME}"/.vscode-server/cli/servers/*/ >/dev/null 2>&1 || ls -d "${HOME}"/.vscode-server/bin/*/ >/dev/null 2>&1; then
+    log_success "VS Code Remote-SSH server present"
+  else
+    note "VS Code server not present yet (connect once from your laptop)"
+  fi
+  if ls -d "${HOME}"/.cursor-server/bin/linux-x64/*/ >/dev/null 2>&1; then
+    log_success "Cursor Remote-SSH server present"
+  else
+    note "Cursor server not present yet (connect once from your laptop)"
+  fi
+  echo
+
+  log_info "=== Repositories: SOT + mirrors + venvs ==="
+  local sot_base
+  if sot_base="$(detect_sot_base)"; then
+    log_success "SOT base: $sot_base"
+  else
+    fail "SOT base not found (expected ~/cloudfiles/code/Users/<you>/main/arrive-aml)" "see HAPPY-PATH.md"
+    sot_base=""
+  fi
+  if [ -d "$MIRROR_BASE" ]; then
+    log_success "Mirror base: $MIRROR_BASE"
+  else
+    fail "$MIRROR_BASE missing (VM restarted? /mnt is wiped on stop/start)" "aml-bootstrap --restore"
+  fi
+  if [ -n "$sot_base" ] && [ -f "${ARRIVE_ROOT}/repos.conf" ]; then
+    local url name mirror sot mir
+    while IFS='|' read -r url name mirror || [ -n "${url:-}" ]; do
+      url="$(trim "${url:-}")"; [ -z "$url" ] && continue; [[ "$url" == \#* ]] && continue
+      name="$(trim "${name:-}")"; [ -n "$name" ] || name="$(basename "$url" .git)"
+      mirror="$(trim "${mirror:-yes}")"
+      sot="${sot_base}/${name}"; mir="${MIRROR_BASE}/${name}"
+      if [ ! -d "$sot/.git" ]; then
+        fail "$name: not cloned to SOT" "bash scripts/setup-repos.sh --only $name"
+        continue
+      fi
+      [ "$mirror" = "yes" ] || { log_success "$name: SOT only (AUTO_MIRROR=$mirror)"; continue; }
+      if mirror_is_valid "$sot" "$mir"; then
+        local branch venv_msg=""
+        branch="$(git -C "$mir" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+        if [ -f "$mir/pyproject.toml" ]; then
+          if [ -x "$mir/.venv/bin/python" ]; then
+            venv_msg=", venv ok"
+          else
+            venv_msg=", venv MISSING"
+            fail "$name: .venv missing/broken in mirror" "bash scripts/lib/setup-python-venv.sh $mir"
+          fi
+        fi
+        log_success "$name: mirror $mir [$branch]$venv_msg"
+      else
+        fail "$name: mirror missing or broken at $mir" "aml-bootstrap --restore   (or: bash scripts/setup-repos.sh --only $name)"
+      fi
+    done < "${ARRIVE_ROOT}/repos.conf"
+  fi
+  echo
+
+  log_info "=== Disk ==="
+  local root_use
+  root_use="$(df --output=pcent / | tail -n1 | tr -dc '0-9')"
+  if [ "${root_use:-0}" -ge 90 ]; then
+    note "OS disk is ${root_use}% full. Big consumers: ~/uv-venvs (legacy venvs), ~/.vscode-server, ~/.cache/uv. venvs now live in $UV_VENV_ROOT."
+  else
+    log_success "OS disk ${root_use}% used"
+  fi
+  if [ -d /mnt ]; then
+    log_success "/mnt (ephemeral local disk): $(df -h --output=avail /mnt | tail -n1 | xargs) free"
+  fi
+  echo
+
   print_separator
-  if [ ${#FAILED_CHECKS[@]} -eq 0 ]; then
-    log_success "All checks passed!"
+  if [ ${#FAILED[@]} -eq 0 ]; then
+    log_success "All required checks passed!"
+    [ ${#NOTES[@]} -gt 0 ] && log_info "${#NOTES[@]} optional note(s) above."
     print_separator
     exit 0
-  else
-    log_warn "Some checks failed:"
-    for check in "${FAILED_CHECKS[@]}"; do
-      echo "  - $check"
-    done
-    print_separator
-    log_info "Run setup again to fix missing components: bash scripts/setup-vm.sh --all"
-    exit 1
   fi
+  log_warn "${#FAILED[@]} required check(s) failed:"
+  local item
+  for item in "${FAILED[@]}"; do
+    echo "  - ${item%%|*}"
+    echo "      fix: ${item#*|}"
+  done
+  print_separator
+  exit 1
 }
 
-main
+main "$@"
