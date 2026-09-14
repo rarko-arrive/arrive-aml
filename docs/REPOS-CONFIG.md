@@ -254,6 +254,6 @@ bash scripts/setup-repos.sh --config repos-ds.conf
 
 ## See Also
 
-- [AZUREML-WORKTREE-PATTERN.md](AZUREML-WORKTREE-PATTERN.md) - Deep dive on worktrees
+- [MIRROR-PATTERN.md](MIRROR-PATTERN.md) - Deep dive on worktrees
 - [README.md](../README.md) - Main setup guide
-- [CLAUDE-SETUP.md](../CLAUDE-SETUP.md) - Claude Code integration
+- [docs/CLAUDE-CODE.md](CLAUDE-CODE.md) - Claude Code integration

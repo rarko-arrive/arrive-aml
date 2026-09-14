@@ -234,4 +234,4 @@ Investigation on `rarko1` found:
 | `scripts/lib/setup-python-venv.sh` | `uv sync` into `/mnt/uv-venvs/<repo>` + `.venv` symlink |
 | `scripts/lib/install-claude-skills.sh` | skills.conf → `~/.claude/skills` |
 | `repos.conf`, `skills.conf` | what gets installed on every VM |
-| `docs/AZUREML-WORKTREE-PATTERN.md` | the SOT/mirror design with measurements |
+| `docs/MIRROR-PATTERN.md` | the SOT/mirror design with measurements |

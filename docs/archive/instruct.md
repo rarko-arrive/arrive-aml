@@ -70,7 +70,7 @@ The repository at `~/cloudfiles/code/Users/rarko/main/azureml-skills/` contains:
 - ✅ `.claude-plugin/plugin.json` - Marketplace metadata
 - ✅ `skills/work-in-repo/SKILL.md` - Complete 8-step workflow
 - ✅ `skills/work-in-repo/references/worktree-commands.md` - Git worktree reference
-- ✅ `QUICKSTART.md` - 5-minute intern-friendly guide
+- ✅ `README.md` - 5-minute intern-friendly guide
 - ✅ `CHEATSHEET.md` - Daily reference
 - ✅ `README.md` - Full documentation
 - ✅ `INSTALL.md` - Detailed installation guide

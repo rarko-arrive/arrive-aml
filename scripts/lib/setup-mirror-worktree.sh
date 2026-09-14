@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Create (or repair) the /mnt/mirror local clone for ONE repository.
-# See docs/AZUREML-WORKTREE-PATTERN.md
+# See docs/MIRROR-PATTERN.md
 #
 # Usage:
 #   bash scripts/lib/setup-mirror-worktree.sh REPO_NAME     # repo in the SOT base
