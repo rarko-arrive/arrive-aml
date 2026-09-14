@@ -102,6 +102,12 @@ force=""; [ "$kind" = "post-rewrite" ] && force="--force-with-lease"
   exec 9>"$lock"; flock 9
   if out="$(git push -q $force sot "HEAD:refs/heads/$branch" 2>&1)"; then
     printf '%s ok   %s %s -> sot\n' "$(date '+%F %T')" "$(basename "$PWD")" "$branch" >> "$log"
+    # keep the SOT's working tree (used by `aml-bootstrap` to run scripts) at the default branch
+    sot="$(git remote get-url sot)"
+    default="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
+    if [ -n "$default" ] && [ "$branch" = "$default" ] && [ -z "$(git -C "$sot" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+      git -C "$sot" checkout -q --detach "$branch" >/dev/null 2>&1 || true
+    fi
   else
     printf '%s FAIL %s %s -> sot: %s\n' "$(date '+%F %T')" "$(basename "$PWD")" "$branch" "$(echo "$out" | tr '\n' ' ')" >> "$log"
   fi
