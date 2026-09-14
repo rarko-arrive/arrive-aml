@@ -102,6 +102,9 @@ main() {
   reexec_as_login_user "$@"
   parse_args "$@"
   export PATH="${HOME}/.local/bin:${PATH}"
+  # Never run from inside a mirror: --restore may replace that very directory,
+  # and git cannot run at all once the cwd has been deleted.
+  cd "$HOME"
 
   mkdir -p "$ARRIVE_STATE_DIR"
   local log="${ARRIVE_STATE_DIR}/bootstrap-$(date +%Y%m%d-%H%M%S).log"

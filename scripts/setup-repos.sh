@@ -119,6 +119,7 @@ setup_repos() {
   print_separator
 
   ensure_local_dir "$MIRROR_BASE"
+  cd "$HOME"   # a mirror may be replaced below; never keep it as cwd
 
   local ok=0 failed=0 failed_names=()
   while read -r url name mirror; do
@@ -143,7 +144,7 @@ setup_repos() {
   echo
   echo "Work in the mirrors (fast local disk):"
   for d in "$MIRROR_BASE"/*/; do
-    [ -f "$d/.git" ] && echo "  cd $d"
+    [ -d "$d/.git" ] && echo "  cd ${d%/}"
   done
   echo
   echo "Every commit in a mirror is pushed to the SOT in the background (log: ~/.local/state/arrive-aml/sot-sync.log)."
