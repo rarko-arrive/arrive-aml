@@ -4,5 +4,12 @@
   "python.languageServer": "None",
   "python.experiments.enabled": false,
   "python.useEnvironmentsExtension": true,
-  "jupyter.notebookFileRoot": "${workspaceFolder}"
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "workbench.editorAssociations": {
+    "*.copilotmd": "vscode.markdown.preview.editor",
+    "*.parquet": "duckdb.dataFileViewer",
+    "*.csv": "duckdb.dataFileViewer",
+    "*.tsv": "duckdb.dataFileViewer",
+    "*.xlsx": "duckdb.dataFileViewer"
+  }
 }

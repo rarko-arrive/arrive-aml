@@ -3,7 +3,7 @@
 ## 📍 Repository Location
 
 The `azureml-skills` repository is saved at:
-- **Primary**: `~/cloudfiles/rarko/main/azureml-skills/`
+- **Primary**: `~/cloudfiles/code/Users/rarko/main/azureml-skills/`
 - **Backup**: `~/azureml-skills/`
 
 ## 📝 Create the GitHub Repository
@@ -20,7 +20,7 @@ Go to: https://github.com/new
 ### 2. Push the Repository
 
 ```bash
-cd ~/cloudfiles/rarko/main/azureml-skills
+cd ~/cloudfiles/code/Users/rarko/main/azureml-skills
 
 # Verify remote is set
 git remote -v
@@ -65,7 +65,7 @@ Once pushed, anyone can install it!
 
 ## 📚 What's Included
 
-The repository at `~/cloudfiles/rarko/main/azureml-skills/` contains:
+The repository at `~/cloudfiles/code/Users/rarko/main/azureml-skills/` contains:
 
 - ✅ `.claude-plugin/plugin.json` - Marketplace metadata
 - ✅ `skills/work-in-repo/SKILL.md` - Complete 8-step workflow
@@ -115,7 +115,7 @@ Claude will automatically:
 ## 🔄 Repository Structure
 
 ```
-~/cloudfiles/rarko/main/azureml-skills/
+~/cloudfiles/code/Users/rarko/main/azureml-skills/
 ├── .claude-plugin/
 │   └── plugin.json          # rarko-arrive/azureml-skills
 ├── skills/
@@ -136,7 +136,7 @@ Git remote: git@github.com:rarko-arrive/azureml-skills.git
 
 ```bash
 # Navigate to repo
-cd ~/cloudfiles/rarko/main/azureml-skills
+cd ~/cloudfiles/code/Users/rarko/main/azureml-skills
 
 # Check status
 git status
@@ -158,7 +158,7 @@ cat INSTALL.md
 
 ```bash
 # It's here:
-ls -la ~/cloudfiles/rarko/main/azureml-skills/
+ls -la ~/cloudfiles/code/Users/rarko/main/azureml-skills/
 
 # Or backup:
 ls -la ~/azureml-skills/
@@ -178,7 +178,7 @@ cat ~/.claude/plugins/known_marketplaces.json | grep azureml-skills
 
 ```bash
 # Reset mirror
-cd ~/cloudfiles/rarko/main/REPO_NAME
+cd ~/cloudfiles/code/Users/rarko/main/REPO_NAME
 git worktree remove --force /mnt/mirror/REPO_NAME
 rm -rf /mnt/mirror/REPO_NAME
 git worktree add /mnt/mirror/REPO_NAME
@@ -194,5 +194,5 @@ git worktree add /mnt/mirror/REPO_NAME
 
 **Next Step**: Create the GitHub repo and run:
 ```bash
-cd ~/cloudfiles/rarko/main/azureml-skills && git push -u origin main
+cd ~/cloudfiles/code/Users/rarko/main/azureml-skills && git push -u origin main
 ```
