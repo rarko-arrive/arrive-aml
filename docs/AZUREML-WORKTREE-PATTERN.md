@@ -19,7 +19,7 @@ mounted on every compute instance you own.
 
 ```
 ~/cloudfiles/code/Users/<you>/main/REPO/     ← Source of Truth (SOT): persistent, shared by all your VMs
-                                               full .git database, HEAD detached, never edited directly
+                                               full .git database, on main, files updated by every push, never edited directly
                                                = remote "sot" of every mirror
 
 /mnt/mirror/REPO/                            ← Mirror: a full local clone, one per compute instance
@@ -60,7 +60,7 @@ replaced; ones with uncommitted changes are moved to `<mirror>.old-worktree-<tim
 
 ```bash
 SOT=~/cloudfiles/code/Users/rarko/main/arrive-aml
-git -C "$SOT" checkout --detach                          # SOT is a database, free its branches
+git -C "$SOT" config receive.denyCurrentBranch updateInstead   # SOT may receive pushes to its checked-out branch
 git clone -b main git@github.com:rarko-arrive/arrive-aml.git /mnt/mirror/arrive-aml
 cd /mnt/mirror/arrive-aml
 git remote add sot "$SOT"

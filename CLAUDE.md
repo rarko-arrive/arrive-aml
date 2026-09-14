@@ -15,7 +15,8 @@ Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) via SMB/CIFS,
                                           - Network mount (slow: 7-30s git status)
                                           - Persistent; the SAME share is mounted on every
                                             compute instance the user owns
-                                          - Full .git database; HEAD is detached (never edit here)
+                                          - Full .git database, checked out on main and updated by pushes
+                                            (receive.denyCurrentBranch=updateInstead); never edit here
 
 /mnt/mirror/REPO/                        ← Active mirror (one per compute instance)
                                           - Local disk: FULL CLONE, git status ~5 ms
@@ -149,7 +150,7 @@ All scripts in `scripts/lib/` are:
 
 ## Key Non-Obvious Patterns
 
-1. **/mnt is ephemeral** - `/mnt` is Azure's resource disk (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`); mirrors, venvs and the uv cache vanish on every stop/start. Commits are safe once the sync hook pushed them to the SOT (seconds). `aml-bootstrap --restore` recreates everything; the bashrc block prints a reminder when `/mnt/mirror` is missing. The SOT is shared by all of the user's compute instances (it is a plain repo with detached HEAD acting as a local remote).
+1. **/mnt is ephemeral** - `/mnt` is Azure's resource disk (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`); mirrors, venvs and the uv cache vanish on every stop/start. Commits are safe once the sync hook pushed them to the SOT (seconds). `aml-bootstrap --restore` recreates everything; the bashrc block prints a reminder when `/mnt/mirror` is missing. The SOT is shared by all of the user's compute instances (it is a plain repo on `main`, acting as a local remote that also updates its working tree on push).
 
 2. **Parallel branches** - the mirror is a normal clone, so `git worktree add /mnt/mirror/arrive-aml-feature1 feature/one` from the mirror works and stays fully local (its admin files live in the mirror's `.git`, not on the share).
 

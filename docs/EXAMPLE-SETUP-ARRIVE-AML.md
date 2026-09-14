@@ -295,7 +295,7 @@ After complete setup:
 ```
 /home/azureuser/
 ├── cloudfiles/code/Users/rarko/main/
-│   └── arrive-aml/              ← Source of Truth (SOT), HEAD detached
+│   └── arrive-aml/              ← Source of Truth (SOT), on main, updated by pushes
 │       ├── .git/                ← Full git database
 │       ├── scripts/
 │       ├── docs/
@@ -338,7 +338,7 @@ cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 git worktree list
 
 # Output:
-# /home/azureuser/cloudfiles/code/Users/rarko/main/arrive-aml  abc123 (detached HEAD)
+# /home/azureuser/cloudfiles/code/Users/rarko/main/arrive-aml  abc123 [main]
 # /mnt/mirror/arrive-aml                             abc123 [feature/new]
 ```
 

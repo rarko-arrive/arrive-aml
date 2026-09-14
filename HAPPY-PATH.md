@@ -107,7 +107,7 @@ and the restore runs on every start without you.
 
 ```
 ~/cloudfiles/code/Users/rarko/main/      SOT - persistent, shared by all your VMs, slow
-├── arrive-aml/    (.git database; HEAD detached - never edit here)
+├── arrive-aml/    (.git database, on main, updated by every push - never edit here)
 ├── azureml-skills/
 └── arrive-ds/
 

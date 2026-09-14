@@ -4,7 +4,8 @@
 # Pattern (see docs/AZUREML-WORKTREE-PATTERN.md):
 #   SOT     ~/cloudfiles/code/Users/<you>/main/REPO   persistent Azure Files share, slow
 #           (60-95 ms per file operation), shared by ALL of your compute instances.
-#           Holds the full .git database. HEAD detached - nobody edits here.
+#           Holds the full .git database, checked out on the default branch and kept
+#           current by pushes (receive.denyCurrentBranch=updateInstead). Nobody edits here.
 #   mirror  /mnt/mirror/REPO   a FULL LOCAL CLONE on the fast local disk (git status
 #           ~5 ms). remotes:  origin = GitHub,  sot = the SOT path.
 #           Hooks push every commit to the SOT in the background, so the persistent
@@ -102,12 +103,6 @@ force=""; [ "$kind" = "post-rewrite" ] && force="--force-with-lease"
   exec 9>"$lock"; flock 9
   if out="$(git push -q $force sot "HEAD:refs/heads/$branch" 2>&1)"; then
     printf '%s ok   %s %s -> sot\n' "$(date '+%F %T')" "$(basename "$PWD")" "$branch" >> "$log"
-    # keep the SOT's working tree (used by `aml-bootstrap` to run scripts) at the default branch
-    sot="$(git remote get-url sot)"
-    default="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')"
-    if [ -n "$default" ] && [ "$branch" = "$default" ] && [ -z "$(git -C "$sot" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-      git -C "$sot" checkout -q --detach "$branch" >/dev/null 2>&1 || true
-    fi
   else
     printf '%s FAIL %s %s -> sot: %s\n' "$(date '+%F %T')" "$(basename "$PWD")" "$branch" "$(echo "$out" | tr '\n' ' ')" >> "$log"
   fi
@@ -151,16 +146,21 @@ configure_mirror_clone() {
   install_sot_sync_hooks "$mirror"
 }
 
-# Keep the SOT a pure database: detach its HEAD if it sits on a branch (and is clean).
-detach_sot() {
-  local sot="$1"
-  git -C "$sot" symbolic-ref -q HEAD >/dev/null 2>&1 || return 0
-  if [ -n "$(git -C "$sot" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-    log_warn "SOT $sot has uncommitted changes - not detaching its HEAD (commit or stash them in the mirror instead)"
-    return 0
+# Make the SOT a push target that keeps its working tree current:
+#  - receive.denyCurrentBranch=updateInstead lets the mirror push the branch the SOT has
+#    checked out (git refuses that by default) and updates the SOT's files as part of the push
+#  - a detached SOT (left by older versions of these scripts) is put back on the default branch
+prepare_sot() {
+  local sot="$1" branch="$2"
+  git -C "$sot" config receive.denyCurrentBranch updateInstead
+  if ! git -C "$sot" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    if [ -n "$(git -C "$sot" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+      log_warn "SOT $sot is detached and has uncommitted changes - leaving it; commit them from the mirror"
+    elif git -C "$sot" show-ref -q --verify "refs/heads/$branch"; then
+      log_info "SOT was detached - checking out '$branch' (slow share, one-time)"
+      git -C "$sot" checkout -q "$branch"
+    fi
   fi
-  log_info "Detaching SOT HEAD (the SOT is a database; work happens in the mirror)"
-  git -C "$sot" checkout -q --detach
 }
 
 # Ensure a fast local mirror clone exists for the SOT repo. Idempotent.
@@ -183,7 +183,7 @@ ensure_mirror_worktree() {
     if mirror_is_valid "$sot" "$mirror"; then
       configure_mirror_clone "$sot" "$mirror" "$branch" "$github_url"
       clear_assume_unchanged "$mirror"
-      detach_sot "$sot"
+      prepare_sot "$sot" "$branch"
       log_success "Mirror OK: $mirror ($(git -C "$mirror" rev-parse --abbrev-ref HEAD 2>/dev/null))"
       return 0
     fi
@@ -207,7 +207,7 @@ ensure_mirror_worktree() {
     remove_mirror_worktree_registration "$sot" "$mirror"
   fi
 
-  detach_sot "$sot"
+  prepare_sot "$sot" "$branch"
 
   log_info "Cloning mirror: $mirror (branch: $branch)"
   if [ -n "$github_url" ] && git clone -q -b "$branch" "$github_url" "$mirror" 2>/dev/null; then

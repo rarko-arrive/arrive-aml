@@ -17,7 +17,7 @@ GitHub  ←──── git push ────  /mnt/mirror/REPO  ──── ho
 
 | | `/mnt/mirror/REPO` (mirror) | `~/cloudfiles/code/Users/<you>/main/REPO` (SOT) |
 |---|---|---|
-| What | Full local git clone. Remotes: `origin` = GitHub, `sot` = the SOT | The persistent `.git` database. HEAD detached. |
+| What | Full local git clone. Remotes: `origin` = GitHub, `sot` = the SOT | The persistent `.git` database, on `main`, files updated by every push (`updateInstead`). |
 | Speed | `git status` 5 ms | `git status` 5 s (60-95 ms per file operation on the share) |
 | Lifetime | Gone after every VM stop/start | Forever, and shared by all your VMs |
 | You | Edit, run, commit, push here | Never edit here. Treat it as a remote. |
@@ -119,6 +119,7 @@ gh pr create --fill                          # 7. open the PR
 # 8. review feedback: edit, commit, git push - repeat
 # 9. after merge:
 git checkout main && git pull && git branch -d feature/short-description
+#    (the post-merge hook pushes main to the SOT, whose files update in place)
 ```
 
 Or let Claude Code drive steps 1-7: in any terminal run `claude`, then `/work-in-repo` and
@@ -213,8 +214,8 @@ Investigation on `rarko1` found:
 - Idempotent: every script can be re-run; nothing is deleted except a *clean* legacy worktree
   mirror. Anything with uncommitted changes is moved to `<mirror>.old-worktree-<time>` or
   `<mirror>.broken-<time>`, never removed.
-- The SOT is only ever written by `git push` (hooks) and by `checkout --detach` of the default
-  branch when it is clean. Nothing runs `git worktree prune` in a SOT.
+- The SOT is only ever written by `git push` (hooks); `receive.denyCurrentBranch=updateInstead`
+  refreshes its files when its checked-out branch is pushed. Nothing runs `git worktree prune` in a SOT.
 - Verification never says "run setup again" without naming the failing check and its fix.
 - All paths are configurable in `~/.config/arrive-aml/env`; nothing assumes the Linux user is
   the Azure ML user (`azureuser` vs `rarko`).
