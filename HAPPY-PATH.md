@@ -1,291 +1,139 @@
-# Happy Path - Fresh Azure ML VM Setup
+# Happy Path - Fresh Azure ML Compute Instance
 
-Complete step-by-step guide for setting up a fresh Azure ML compute instance.
+Step-by-step for a brand-new compute instance. Total time: about 5-10 minutes, one command.
 
 ## Prerequisites
 
-- Azure ML compute instance (Ubuntu)
-- SSH access to the VM
-- GitHub account with SSH key configured
+- An Azure ML compute instance (Ubuntu) in the Arrive workspace, started
+- A terminal on it (Azure ML studio terminal, or SSH)
+- A GitHub account in the `rarko-arrive` org
 
-## Step-by-Step Setup
+## 1. Find arrive-aml on the shared drive
 
-### 1. Fix Cloudfiles Ownership
+`~/cloudfiles/code/Users/<you>/` is the workspace file share. It is the same on every compute
+instance you own, so `arrive-aml` is normally already there:
 
 ```bash
-# Fix ownership of your cloudfiles directory
-sudo chown -R $USER:$USER ~/cloudfiles/code/Users/$USER
+ls ~/cloudfiles/code/Users/*/main/arrive-aml
 ```
 
-### 2. Create Main Directory Structure
+If it is missing, clone it (replace `rarko` with your folder name):
 
 ```bash
-# Create the main directory for repositories
-mkdir -p ~/cloudfiles/code/Users/$USER/main
-cd ~/cloudfiles/code/Users/$USER/main
-```
-
-### 3. Clone arrive-aml
-
-```bash
-# Clone the setup repository
+mkdir -p ~/cloudfiles/code/Users/rarko/main
+cd ~/cloudfiles/code/Users/rarko/main
+gh auth login          # GitHub CLI is pre-installed on Azure ML images; pick SSH when asked
 git clone git@github.com:rarko-arrive/arrive-aml.git
-cd arrive-aml
 ```
 
-**If SSH fails**, configure GitHub SSH first:
-```bash
-# Run the SSH setup from arrive-aml
-bash scripts/lib/configure-github-ssh.sh
-
-# Test connection
-ssh -T git@github.com
-# Should show: "Hi rarko-arrive! You've successfully authenticated"
-```
-
-### 4. Run Full VM Setup (Optional but Recommended)
+## 2. Run the bootstrap
 
 ```bash
-# Install all development tools
-bash scripts/setup-vm.sh --all
-
-# This installs:
-# - Git optimization (2-4x faster)
-# - System tools (curl, wget, htop, jq, tree, vim)
-# - uv (Python package manager)
-# - GitHub CLI (gh)
-# - Docker & docker-compose
-# - VS Code
-# - Cursor (optional, may fail - that's OK)
+bash ~/cloudfiles/code/Users/rarko/main/arrive-aml/scripts/bootstrap.sh
 ```
 
-### 5. Setup All Team Repositories
+What happens (all idempotent, re-run any time):
+
+| Step | What | Where it lands |
+|------|------|----------------|
+| 1 | git tuned for the network mount, uv, gh, GitHub SSH key, Docker, Claude Code | OS disk (persists) |
+| 2 | `aml-bootstrap` command, `~/.config/arrive-aml/env`, bashrc block | OS disk |
+| 3 | every repo in `repos.conf` cloned to the SOT, local mirror clone (+ SOT sync hooks), uv venv | SOT: cloudfiles. Mirror + venv: `/mnt` |
+| 4 | team Claude Code skills (`skills.conf`) linked into `~/.claude/skills` | OS disk |
+| 5 | verification - each failed check prints its fix | |
+
+Expected tail of the output:
+
+```
+✓ arrive-aml: mirror /mnt/mirror/arrive-aml [main], venv ok
+✓ azureml-skills: mirror /mnt/mirror/azureml-skills [main]
+✓ arrive-ds: mirror /mnt/mirror/arrive-ds [main], venv ok
+✓ All required checks passed!
+✓ Bootstrap complete. Your VM is ready.
+```
+
+Then `source ~/.bashrc` (or open a new terminal).
+
+If GitHub SSH is not set up yet, step 1 creates `~/.ssh/id_ed25519_github` and uploads it with
+`gh`; if `gh` is not logged in, run `gh auth login` and re-run the bootstrap.
+
+## 3. Sign in to Claude Code (once per VM)
 
 ```bash
-# Automatically clone and mirror all configured repos:
-# - arrive-aml (this repo)
-# - azureml-skills (Claude Code skills)
-# - arrive-ds (data science utilities)
-
-bash scripts/setup-repos.sh
+claude auth login      # opens a URL - paste the code back into the terminal
 ```
 
-**Expected output:**
-```
-==> Setting up repositories from repos.conf
+Then in any repo: `claude` and `/work-in-repo`.
 
-==> Processing: arrive-aml
-✓ Repository already exists at SOT
-✓ Mirror created: /mnt/mirror/arrive-aml
+## 4. Connect your laptop (Cursor / VS Code)
 
-==> Processing: azureml-skills
-✓ Cloned azureml-skills
-✓ Mirror created: /mnt/mirror/azureml-skills
-
-==> Processing: arrive-ds
-✓ Cloned arrive-ds
-✓ Mirror created: /mnt/mirror/arrive-ds
-
-==================================================================
-✓ Repository setup complete!
-
-Summary:
-  Cloned: 2 new repositories
-  Mirrors: 3 worktrees created
-  Skipped: 1 existing repositories
-==================================================================
-```
-
-### 6. Install Claude CLI (Optional)
+On your **laptop** (not the VM):
 
 ```bash
-# Install Claude Code CLI
-curl -fsSL https://claude.ai/install.sh | sh
-
-# Restart shell or source bashrc
-source ~/.bashrc
-
-# Verify
-claude --version
+bash scripts/setup-azureml-ssh.sh    # from your local arrive-aml clone
 ```
 
-### 7. Verify Setup
+Remote-SSH to the VM and open `/mnt/mirror/<repo>`. Cursor/VS Code install their server
+component on the VM automatically. Details: [docs/SSH-SETUP-FROM-LAPTOP.md](docs/SSH-SETUP-FROM-LAPTOP.md).
 
-```bash
-# Run the test script
-cd ~/cloudfiles/code/Users/$USER/main/arrive-aml
-./test-happy-path.sh
-```
+## 5. Work
 
-**All tests should pass:**
-- ✅ GitHub SSH working
-- ✅ Mirror directory setup
-- ✅ Repository in canonical location
-- ✅ Git performance acceptable
-- ✅ azureml-skills accessible
-- ✅ Documentation files present
-- ✅ Mirror worktrees created
-
-### 8. Install Claude Code Extension + Skills
-
-**In VS Code or Cursor:**
-
-1. Install Claude Code extension (Ctrl+Shift+X, search "Claude Code")
-2. Sign in with Anthropic account
-
-**Add azureml-skills marketplace:**
-
-Edit `~/.claude/plugins/known_marketplaces.json`:
-```json
-{
-  "azureml-skills": {
-    "source": {
-      "source": "github",
-      "repo": "rarko-arrive/azureml-skills"
-    },
-    "installLocation": "/home/azureuser/.claude/plugins/marketplaces/azureml-skills",
-    "lastUpdated": "2026-09-11T00:00:00.000Z"
-  }
-}
-```
-
-**Install the main skill:**
-```bash
-# In Claude Code (in your IDE):
-/plugin install azureml-skills work-in-repo
-
-# Verify:
-/plugin list
-```
-
-### 9. Start Working!
-
-**Always work in the mirrors for fast git:**
 ```bash
 cd /mnt/mirror/arrive-aml
-# Git operations are <1 second here!
-
-# Or use Claude Code:
-/work-in-repo
-# Tell Claude what to do, it handles everything!
+git checkout -b feature/my-change
+# edit, test
+git add -A && git commit -m "..."
+git push                              # push.autoSetupRemote is on
 ```
 
-## What You Get
+Each commit is pushed to the SOT's `.git` on cloudfiles by a background hook (remote `sot`),
+so nothing is lost if `/mnt` disappears - only uncommitted edits. `bash scripts/verify-setup.sh`
+reports any commit whose push did not make it (`git push sot HEAD` to retry).
 
-After completing the happy path:
+## After a VM stop/start
 
-### Repository Structure
-```
-~/cloudfiles/code/Users/rarko/main/
-├── arrive-aml/          ← SOT (Source of Truth)
-├── azureml-skills/      ← SOT (Claude skills)
-└── arrive-ds/           ← SOT (Data science utils)
-
-/mnt/mirror/
-├── arrive-aml/          ← Fast mirror (100x faster git!)
-├── azureml-skills/      ← Fast mirror
-└── arrive-ds/           ← Fast mirror
-```
-
-### Performance Comparison
-
-| Location | Git Status | Use For |
-|----------|-----------|---------|
-| `~/cloudfiles/.../main/REPO/` | 7-30 seconds | Backup only |
-| `/mnt/mirror/REPO/` | <1 second | All development |
-
-### Installed Tools
-
-- ✅ Git (optimized for network storage)
-- ✅ uv (fast Python package manager)
-- ✅ GitHub CLI (gh)
-- ✅ Docker & docker-compose
-- ✅ Claude CLI (optional)
-- ✅ VS Code / Cursor
-- ✅ Claude Code extension
-- ✅ azureml-skills library
-
-## Common Issues & Fixes
-
-### Permission Denied on Cloudfiles
+`/mnt` is Azure's ephemeral resource disk and comes back empty. Your shell will remind you:
 
 ```bash
-sudo chown -R $USER:$USER ~/cloudfiles/code/Users/$USER
+aml-bootstrap --restore    # recreates mirrors + venvs, refreshes skills, verifies
 ```
 
-### GitHub SSH Not Working
+Optional: paste the same line into the compute instance's **startup script** (Azure ML studio ->
+Compute -> your instance -> Startup script) as
+`sudo -u azureuser -H bash /home/azureuser/cloudfiles/code/Users/rarko/main/arrive-aml/scripts/bootstrap.sh --restore`
+and the restore runs on every start without you.
 
-```bash
-# Restart SSH agent
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519_github
+## Layout you end up with
 
-# Test
-ssh -T git@github.com
+```
+~/cloudfiles/code/Users/rarko/main/      SOT - persistent, shared by all your VMs, slow
+├── arrive-aml/    (.git database, on main, updated by every push - never edit here)
+├── azureml-skills/
+└── arrive-ds/
+
+/mnt/mirror/                             per-VM local clones - fast, wiped on stop/start
+├── arrive-aml/    [main]  .venv -> /mnt/uv-venvs/arrive-aml
+├── azureml-skills/[main]
+└── arrive-ds/     [main]  .venv -> /mnt/uv-venvs/arrive-ds
+
+/mnt/uv-venvs/, /mnt/uv-cache/           uv venvs + cache - fast, big disk, recreated by --restore
+~/.claude/skills/work-in-repo            -> ~/.claude/plugins/marketplaces/azureml-skills/skills/work-in-repo
 ```
 
-### Repository in Wrong Location
+## Common issues
 
-```bash
-# Move to correct location
-mkdir -p ~/cloudfiles/code/Users/$USER/main
-mv /old/path/arrive-aml ~/cloudfiles/code/Users/$USER/main/
-```
+| Issue | Fix |
+|-------|-----|
+| `Could not determine the SOT base` | arrive-aml must live at `~/cloudfiles/code/Users/<you>/main/arrive-aml` (or `export ARRIVE_SOT_BASE=...`) |
+| `Clone failed` / `Permission denied (publickey)` | `gh auth login`, then `bash scripts/lib/configure-github-ssh.sh` |
+| `! [rejected]` in `~/.local/state/arrive-aml/sot-sync.log` | Another VM pushed the same branch to the SOT first: `git pull sot <branch>` then commit again |
+| Mirror exists but git errors | `aml-bootstrap --restore` moves the broken dir to `*.broken-<time>` and recreates it |
+| OS disk >90% full | Delete legacy venvs: `rm -rf ~/uv-venvs/<name>`; old VS Code servers: `~/.vscode-server/cli/servers/` |
+| `claude: command not found` | `bash scripts/lib/install-claude.sh && source ~/.bashrc` |
 
-### Mirror Worktree Issues
+## Next
 
-```bash
-# Reset mirror
-cd ~/cloudfiles/code/Users/$USER/main/REPO
-git worktree remove --force /mnt/mirror/REPO
-rm -rf /mnt/mirror/REPO
-git worktree add /mnt/mirror/REPO
-```
-
-### Claude CLI Not Found
-
-```bash
-# Install manually
-curl -fsSL https://claude.ai/install.sh | sh
-source ~/.bashrc
-```
-
-## Quick Copy-Paste (All Commands)
-
-```bash
-# Complete setup in one go:
-sudo chown -R $USER:$USER ~/cloudfiles/code/Users/$USER && \
-mkdir -p ~/cloudfiles/code/Users/$USER/main && \
-cd ~/cloudfiles/code/Users/$USER/main && \
-git clone git@github.com:rarko-arrive/arrive-aml.git && \
-cd arrive-aml && \
-bash scripts/setup-vm.sh --all && \
-bash scripts/setup-repos.sh && \
-echo "✅ Setup complete! Read CLAUDE-SETUP.md for next steps."
-```
-
-## Next Steps
-
-1. **Read CLAUDE-SETUP.md** - Claude Code integration
-2. **Read docs/AZUREML-WORKTREE-PATTERN.md** - Deep dive on worktrees
-3. **Read docs/REPOS-CONFIG.md** - Customize repos.conf
-4. **Try /work-in-repo** - Experience the automated workflow!
-
-## Documentation
-
-- **CLAUDE-SETUP.md** - Claude Code + skills installation
-- **AZURE-ML-PATHS.md** - Path structure explained
-- **docs/REPOS-CONFIG.md** - Repository configuration
-- **docs/AZUREML-WORKTREE-PATTERN.md** - Worktree pattern details
-- **test-happy-path.sh** - Automated verification script
-
-## Support
-
-- **GitHub**: https://github.com/rarko-arrive/arrive-aml
-- **Skills**: https://github.com/rarko-arrive/azureml-skills
-- **Internal**: Ask Rick Arko (@rarko) or #data-science-infra
-
----
-
-**Time to complete**: ~10 minutes  
-**Result**: Fully configured Azure ML development environment with fast git operations!
+- [QUICKSTART.md](QUICKSTART.md) - one-page cheat sheet
+- [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md) - why SOT + mirror works
+- [docs/REPOS-CONFIG.md](docs/REPOS-CONFIG.md) - adding repos
+- [CLAUDE-SETUP.md](CLAUDE-SETUP.md) - Claude Code + skills

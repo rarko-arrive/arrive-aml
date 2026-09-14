@@ -1,3 +1,8 @@
+> **Note (2026-09):** mirrors are now full local clones with the SOT as remote `sot`
+> (see [AZUREML-WORKTREE-PATTERN.md](AZUREML-WORKTREE-PATTERN.md)). Where this walkthrough shows
+> `git worktree add/remove/prune` against `/mnt/mirror/<repo>`, use `aml-bootstrap --restore`
+> or `bash scripts/lib/setup-mirror-worktree.sh <repo>` instead. Never `git worktree prune` in a SOT.
+
 # Example: Setting Up arrive-aml with Mirror Worktree Pattern
 
 This is a **complete walkthrough** showing how to set up the arrive-aml repository using the canonical Azure ML workflow.
@@ -8,8 +13,8 @@ This is a **complete walkthrough** showing how to set up the arrive-aml reposito
 
 ```bash
 # Create the SOT location
-mkdir -p ~/cloudfiles/rarko/main
-cd ~/cloudfiles/rarko/main
+mkdir -p ~/cloudfiles/code/Users/rarko/main
+cd ~/cloudfiles/code/Users/rarko/main
 
 # Clone arrive-aml
 git clone git@github.com:rarko-arrive/arrive-aml.git
@@ -17,7 +22,7 @@ cd arrive-aml
 
 # This is your Source of Truth (SOT)
 pwd
-# Output: /home/azureuser/cloudfiles/rarko/main/arrive-aml
+# Output: /home/azureuser/cloudfiles/code/Users/rarko/main/arrive-aml
 ```
 
 **Note**: This location is:
@@ -45,11 +50,11 @@ source ~/.bashrc
 
 ```bash
 # From the SOT, create mirror on fast local disk
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 bash scripts/lib/setup-mirror-worktree.sh
 
 # This creates:
-# /mnt/mirror/arrive-aml/ ← Your active worktree (FAST!)
+# /mnt/mirror/arrive-aml/ ← Your active mirror clone (FAST!)
 ```
 
 ### Step 4: Switch to Mirror
@@ -63,7 +68,7 @@ time git status
 # Output: real 0m0.004s  ⚡ FAST!
 
 # Compare with SOT
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 time git status
 # Output: real 0m7.682s  🐌 Slow
 
@@ -119,7 +124,7 @@ gh pr create --title "Add neovim installer" \
 
 # Your work is now:
 # ✓ In /mnt/mirror/arrive-aml (fast local disk)
-# ✓ In ~/cloudfiles/rarko/main/arrive-aml/.git (persistent)
+# ✓ In ~/cloudfiles/code/Users/rarko/main/arrive-aml/.git (persistent)
 # ✓ On GitHub (remote backup)
 ```
 
@@ -127,7 +132,7 @@ gh pr create --title "Add neovim installer" \
 
 ```bash
 # Create additional worktrees for parallel work
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 
 # Feature 1: New installer
 git worktree add /mnt/mirror/arrive-aml-installer feature/new-installer
@@ -149,7 +154,7 @@ cd /mnt/mirror/arrive-aml-hotfix
 # Fix bug, commit, push
 
 # List all worktrees
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 git worktree list
 ```
 
@@ -165,7 +170,7 @@ cd /mnt/mirror/arrive-aml
 bash scripts/bootstrap-azureml.sh
 
 # This creates:
-# ~/uv-envs/arrive-aml/ ← Venv on local disk (fast!)
+# /mnt/uv-venvs/arrive-aml/ ← Venv on fast local disk
 # /mnt/mirror/arrive-aml/.venv ← Symlink to it
 ```
 
@@ -196,7 +201,7 @@ cd /mnt/mirror/arrive-aml
 cursor .
 
 # ✗ Bad - Don't open SOT (slow)
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 cursor .  # Laggy, slow file watching
 ```
 
@@ -251,11 +256,11 @@ jobs:
       - name: Checkout to SOT
         uses: actions/checkout@v3
         with:
-          path: ~/cloudfiles/rarko/main/arrive-aml
+          path: ~/cloudfiles/code/Users/rarko/main/arrive-aml
       
       - name: Create mirror worktree
         run: |
-          cd ~/cloudfiles/rarko/main/arrive-aml
+          cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
           git worktree add /mnt/mirror/arrive-aml-ci || true
       
       - name: Run tests (fast!)
@@ -267,29 +272,21 @@ jobs:
 
 ## Handling VM Restarts
 
-### /mnt Persistence
+### /mnt Is Ephemeral
 
-Good news: `/mnt/mirror` **persists across VM restarts**!
+`/mnt` is Azure's resource disk: `/mnt/mirror` and `/mnt/uv-venvs` are **wiped on every VM
+stop/start**. Your shell prints a reminder when that happened.
 
 ```bash
-# After VM restart, your mirror is still there
+aml-bootstrap --restore    # recreates every mirror + venv from the SOT (about a minute)
 cd /mnt/mirror/arrive-aml
-git status  # Still works!
 ```
 
-### If Mirror Gets Wiped
+Your work is safe in:
+1. SOT's .git database (~/cloudfiles) - every commit made in the mirror lands there immediately
+2. Remote (GitHub) - if you pushed
 
-In rare cases, if `/mnt/mirror` is wiped:
-
-```bash
-# Re-create from SOT (fast - just links)
-cd ~/cloudfiles/rarko/main/arrive-aml
-git worktree add /mnt/mirror/arrive-aml
-
-# Your work is safe in:
-# 1. SOT's .git database (~/cloudfiles)
-# 2. Remote (GitHub) - if you pushed
-```
+Only uncommitted edits in the mirror are lost, so commit often.
 
 ## Directory Structure Overview
 
@@ -297,28 +294,28 @@ After complete setup:
 
 ```
 /home/azureuser/
-├── cloudfiles/rarko/main/
-│   └── arrive-aml/              ← Source of Truth (SOT)
+├── cloudfiles/code/Users/rarko/main/
+│   └── arrive-aml/              ← Source of Truth (SOT), on main, updated by pushes
 │       ├── .git/                ← Full git database
 │       ├── scripts/
 │       ├── docs/
 │       └── README.md
 │
-├── uv-envs/
-│   └── arrive-aml/              ← Python venv (local disk)
+/mnt/uv-venvs/
+│   └── arrive-aml/              ← Python venv (fast local disk, recreated by --restore)
 │       └── ...
 │
 └── /mnt/mirror/
-    └── arrive-aml/              ← Active worktree (WORK HERE!)
+    └── arrive-aml/              ← Active mirror clone (WORK HERE!) [main]
         ├── .git ───┐            ← Pointer to SOT's .git
-        ├── .venv ──┼──> ~/uv-envs/arrive-aml/
+        ├── .venv ──┼──> /mnt/uv-venvs/arrive-aml/
         ├── scripts/│
         ├── docs/   │
         └── README.md
                     │
     (git database)  │
                     ↓
-    ~/cloudfiles/rarko/main/arrive-aml/.git/
+    ~/cloudfiles/code/Users/rarko/main/arrive-aml/.git/
 ```
 
 ## Cleanup & Maintenance
@@ -327,7 +324,7 @@ After complete setup:
 
 ```bash
 # From SOT
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 git worktree remove /mnt/mirror/arrive-aml
 
 # Or force
@@ -337,18 +334,18 @@ git worktree remove --force /mnt/mirror/arrive-aml
 ### List All Worktrees
 
 ```bash
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 git worktree list
 
 # Output:
-# /home/azureuser/cloudfiles/rarko/main/arrive-aml  abc123 [main]
+# /home/azureuser/cloudfiles/code/Users/rarko/main/arrive-aml  abc123 [main]
 # /mnt/mirror/arrive-aml                             abc123 [feature/new]
 ```
 
 ### Prune Stale Worktrees
 
 ```bash
-cd ~/cloudfiles/rarko/main/arrive-aml
+cd ~/cloudfiles/code/Users/rarko/main/arrive-aml
 git worktree prune
 ```
 
@@ -356,8 +353,8 @@ git worktree prune
 
 ```bash
 # ONE-TIME SETUP
-mkdir -p ~/cloudfiles/rarko/main
-cd ~/cloudfiles/rarko/main
+mkdir -p ~/cloudfiles/code/Users/rarko/main
+cd ~/cloudfiles/code/Users/rarko/main
 git clone git@github.com:rarko-arrive/arrive-aml.git
 cd arrive-aml
 bash scripts/setup-vm.sh --all

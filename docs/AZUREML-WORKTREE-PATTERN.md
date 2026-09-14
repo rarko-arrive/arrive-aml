@@ -1,475 +1,103 @@
-# Azure ML Persistent Mirror Worktree Pattern
-
-**The canonical workflow for efficient development on Azure ML compute instances.**
+# Azure ML Mirror Pattern: SOT on cloudfiles + local clone on /mnt
 
 ## The Problem
 
-Azure ML's `~/cloudfiles/code/Users/` is network-mounted (SMB/CIFS), making git operations painfully slow:
-- `git status`: 7-30 seconds
-- `git diff`: 10-40 seconds
-- IDE file watching: constant lag
+Azure ML compute instances mount your files from Azure Files (CIFS) at `~/cloudfiles/code/Users/<you>/`.
+Every file operation on that share costs 60-95 ms, so git is painfully slow there:
 
-**But we need persistence** - `/tmp` is fast but ephemeral (wiped on VM restart).
+| Where | `git status` (arrive-aml, measured 2026-09-14) |
+|-------|--------------------------------------------------|
+| SOT on cloudfiles | 5.4 s |
+| `git worktree` on /mnt linked to the SOT's `.git` | 3.0 s (index, HEAD and refs still live on the share) |
+| full local clone on /mnt | 0.005 s |
 
-## The Solution: Persistent Mirror Worktree
+Local disk (`/mnt`, 600 GB) is fast but **ephemeral**: it is Azure's resource disk and is wiped on
+every stop/start (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`). The share is persistent and is
+mounted on every compute instance you own.
 
-Use **two locations** working together:
-
-```
-~/cloudfiles/rarko/main/repo-name/     ← Source of Truth (SOT) - persistent
-                                          Network mount (slow but never lost)
-
-/mnt/mirror/repo-name/                  ← Active Worktree - fast local disk
-                                          Where you actually work (fast, persists across sessions)
-```
-
-`/mnt/mirror/` is **local disk that persists** - best of both worlds!
-
-## Architecture
+## The Solution
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  ~/cloudfiles/rarko/main/repo-name/  (SOT)                  │
-│  - Full git repository (.git directory)                      │
-│  - Network-mounted (slow)                                    │
-│  - Automatically backed up by Azure                          │
-│  - Accessible from laptop/other VMs                          │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            │ git worktree add
-                            ↓
-┌─────────────────────────────────────────────────────────────┐
-│  /mnt/mirror/repo-name/  (Active Worktree)                  │
-│  - Linked git worktree (shared .git)                        │
-│  - Local disk (fast!)                                        │
-│  - Persists across VM restarts                              │
-│  - Where you do all your work                               │
-└─────────────────────────────────────────────────────────────┘
+~/cloudfiles/code/Users/<you>/main/REPO/     ← Source of Truth (SOT): persistent, shared by all your VMs
+                                               full .git database, on main, files updated by every push, never edited directly
+                                               = remote "sot" of every mirror
+
+/mnt/mirror/REPO/                            ← Mirror: a full local clone, one per compute instance
+                                               remotes: origin = GitHub, sot = SOT path
+                                               hooks push each commit to sot in the background
+                                               where you work: git status in ~5 ms
 ```
 
-## Setup (One-Time Per Repo)
+- **Commit** in the mirror → `post-commit` hook runs `git push sot HEAD:<branch>` in the background
+  (serialized, logged to `~/.local/state/arrive-aml/sot-sync.log`). Same for `post-merge` and
+  `post-rewrite` (amend/rebase use `--force-with-lease`).
+- **Push** to GitHub as always: `git push` (remote.pushDefault = origin, push.autoSetupRemote on).
+- **Restart**: `aml-bootstrap --restore` re-clones from GitHub (falls back to the SOT when offline),
+  adds the `sot` remote, fetches the branches that only the SOT has, and fast-forwards the default
+  branch to whatever the SOT has. Then it rebuilds venvs.
+- **Verify**: `bash scripts/verify-setup.sh` flags commits that never reached the SOT.
 
-### 1. Clone to Source of Truth
+All of this is `scripts/lib/mirror.sh` (`ensure_mirror_worktree` - the name is historical),
+driven by `scripts/setup-repos.sh` and `scripts/bootstrap.sh`.
+
+## Why not `git worktree add /mnt/mirror/REPO`?
+
+The earlier version of this repo did exactly that. Two problems, both measured:
+
+1. A linked worktree keeps its own index, HEAD and per-worktree refs inside the SOT's
+   `.git/worktrees/<id>/` on the share, and every command also reads the shared refs, config and
+   packs from there: about 30 share round-trips per `git status` = 3 s.
+2. The SOT is one `.git` shared by all your compute instances while `/mnt/mirror/REPO` is a
+   per-instance path. Each instance registers the *same path*, so from any other instance the
+   registration looks "prunable"; one `git worktree prune` (or an old `setup-repos.sh`) could
+   detach a live mirror on another VM.
+
+A clone has none of that: plain remotes, per-instance state, and the SOT is touched only by the
+background push. `mirror.sh` converts legacy worktree mirrors automatically (clean ones are
+replaced; ones with uncommitted changes are moved to `<mirror>.old-worktree-<timestamp>`).
+
+## Manual equivalent (what the scripts do)
 
 ```bash
-# Create persistent location
-mkdir -p ~/cloudfiles/rarko/main
-cd ~/cloudfiles/rarko/main
-
-# Clone your repository
-git clone git@github.com:your-org/repo-name.git
-cd repo-name
+SOT=~/cloudfiles/code/Users/rarko/main/arrive-aml
+git -C "$SOT" config receive.denyCurrentBranch updateInstead   # SOT may receive pushes to its checked-out branch
+git clone -b main git@github.com:rarko-arrive/arrive-aml.git /mnt/mirror/arrive-aml
+cd /mnt/mirror/arrive-aml
+git remote add sot "$SOT"
+git fetch sot                                            # branches never pushed to GitHub
+git config remote.pushDefault origin
+git config checkout.defaultRemote origin
+# hooks: .git/hooks/post-commit|post-merge|post-rewrite -> git push sot HEAD:<branch> (background)
 ```
 
-### 2. Create Mirror Worktree
+## Daily workflow
 
 ```bash
-# Create mirror directory
-sudo mkdir -p /mnt/mirror
-sudo chown $USER:$USER /mnt/mirror
-
-# Add worktree on fast local disk
-cd ~/cloudfiles/rarko/main/repo-name
-git worktree add /mnt/mirror/repo-name
-
-# Now work in the mirror
-cd /mnt/mirror/repo-name
-```
-
-### 3. Test Performance
-
-```bash
-# In mirror (fast!)
-cd /mnt/mirror/repo-name
-time git status  # <1 second ⚡
-
-# In SOT (slow)
-cd ~/cloudfiles/rarko/main/repo-name
-time git status  # 7-30 seconds 🐌
-```
-
-## Daily Workflow
-
-### Start of Day
-
-```bash
-# Always work in the mirror
-cd /mnt/mirror/repo-name
-
-# Pull latest changes
-git pull origin main
-
-# Create feature branch
+cd /mnt/mirror/arrive-aml
 git checkout -b feature/your-feature
+# edit, test
+git add -A && git commit -m "..."        # hook pushes to sot in the background
+git push                                 # GitHub
 ```
 
-### During Development
-
-```bash
-# Work in /mnt/mirror/repo-name
-cd /mnt/mirror/repo-name
-
-# Fast git operations
-git status           # <1s
-git diff            # <1s
-git add .
-git commit -m "Changes"
-
-# IDE/Editor works smoothly
-cursor .            # Fast file watching
-code .              # No lag
-```
-
-### Sync to SOT (Push to Remote)
-
-```bash
-# In mirror worktree
-cd /mnt/mirror/repo-name
-
-# Commit your work
-git add .
-git commit -m "Your changes"
-
-# Push to remote (goes through SOT)
-git push origin feature/your-feature
-```
-
-The push automatically syncs through the SOT's `.git` directory!
-
-### End of Day
-
-```bash
-# Just commit and push - that's it!
-git add .
-git commit -m "End of day checkpoint"
-git push origin feature/your-feature
-
-# Your work is:
-# ✓ In /mnt/mirror (fast local disk)
-# ✓ In ~/cloudfiles (persistent network mount)
-# ✓ On remote (GitHub/Azure DevOps)
-```
-
-## How Git Worktrees Work
-
-```bash
-# SOT structure
-~/cloudfiles/rarko/main/repo-name/
-├── .git/              # Full repository database
-├── src/
-└── README.md
-
-# Mirror structure  
-/mnt/mirror/repo-name/
-├── .git               # Pointer to SOT's .git directory
-├── src/               # Your working files
-└── README.md
-
-# They share the same .git database!
-```
-
-When you commit in `/mnt/mirror/`, it's stored in `~/cloudfiles/rarko/main/repo-name/.git/`
-When you push, it uses the SOT's git database.
-
-## Advanced: Multiple Worktrees
-
-Work on multiple branches simultaneously:
-
-```bash
-# SOT
-cd ~/cloudfiles/rarko/main/repo-name
-
-# Create worktrees for different features
-git worktree add /mnt/mirror/repo-name-feature1 feature/feature1
-git worktree add /mnt/mirror/repo-name-feature2 feature/feature2
-git worktree add /mnt/mirror/repo-name-hotfix hotfix/critical-bug
-
-# Switch between them instantly
-cd /mnt/mirror/repo-name-feature1   # Work on feature 1
-cd /mnt/mirror/repo-name-feature2   # Switch to feature 2
-cd /mnt/mirror/repo-name-hotfix     # Jump to hotfix
-```
-
-Each worktree is independent but shares the same git database - no expensive re-cloning!
-
-## Python Virtual Environments
-
-Keep venvs on local disk too:
-
-```bash
-# In mirror worktree
-cd /mnt/mirror/repo-name
-
-# Create venv on local disk (fast!)
-uv venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-uv pip install -r requirements.txt
-
-# Add to .gitignore
-echo ".venv/" >> .gitignore
-```
-
-## IDE/Editor Configuration
-
-### Cursor / VS Code
-
-**Always open the mirror worktree:**
-
-```bash
-# Good - fast
-cd /mnt/mirror/repo-name
-cursor .
-
-# Bad - slow
-cd ~/cloudfiles/rarko/main/repo-name
-cursor .  # Don't do this!
-```
-
-Your IDE will:
-- ✓ Load files instantly
-- ✓ Watch for changes without lag
-- ✓ Run git operations smoothly
-- ✓ Use the local disk for temporary files
-
-### Configure Exclude Patterns
-
-In `/mnt/mirror/repo-name/.vscode/settings.json`:
-
-```json
-{
-  "files.watcherExclude": {
-    "**/.git/objects/**": true,
-    "**/.git/subtree-cache/**": true,
-    "**/node_modules/**": true,
-    "**/.venv/**": true
-  },
-  "search.exclude": {
-    "**/.venv": true,
-    "**/node_modules": true
-  }
-}
-```
-
-## Cleanup / Removal
-
-### Remove a Worktree
-
-```bash
-# From the SOT
-cd ~/cloudfiles/rarko/main/repo-name
-git worktree remove /mnt/mirror/repo-name
-
-# Or force remove if needed
-git worktree remove --force /mnt/mirror/repo-name
-
-# Clean up orphaned worktrees
-git worktree prune
-```
-
-### Start Fresh
-
-```bash
-# Remove mirror
-rm -rf /mnt/mirror/repo-name
-
-# Re-create from SOT
-cd ~/cloudfiles/rarko/main/repo-name
-git worktree add /mnt/mirror/repo-name
-```
+Multiple branches side by side: `git worktree add /mnt/mirror/arrive-aml-feature1 feature/one`
+*from the mirror* - that worktree's admin files live in the mirror's local `.git`, so it stays fast.
 
 ## Troubleshooting
 
-### "Already exists and is not a valid git repo"
-
-```bash
-# Clean up stale worktree
-cd ~/cloudfiles/rarko/main/repo-name
-git worktree prune
-
-# Remove directory
-rm -rf /mnt/mirror/repo-name
-
-# Re-add
-git worktree add /mnt/mirror/repo-name
-```
-
-### "Worktree is locked"
-
-```bash
-cd ~/cloudfiles/rarko/main/repo-name
-git worktree unlock /mnt/mirror/repo-name
-```
-
-### Changes Not Syncing
-
-```bash
-# Check worktree status
-cd ~/cloudfiles/rarko/main/repo-name
-git worktree list
-
-# Verify both point to same .git
-cd /mnt/mirror/repo-name
-cat .git  # Should point to SOT's .git
-```
-
-### /mnt/mirror/ Wiped After VM Restart
-
-If `/mnt/mirror/` is empty after restart:
-
-```bash
-# Re-create from SOT (fast - just links, not clone)
-cd ~/cloudfiles/rarko/main/repo-name
-git worktree add /mnt/mirror/repo-name
-
-# Your changes are safe in:
-# 1. SOT's .git database
-# 2. Remote (if you pushed)
-```
+| Symptom | Fix |
+|---------|-----|
+| `/mnt/mirror` missing after restart | `aml-bootstrap --restore` |
+| `verify-setup.sh`: "N commit(s) not yet in the SOT" | `cd /mnt/mirror/REPO && git push sot HEAD`; check `~/.local/state/arrive-aml/sot-sync.log` |
+| `! [rejected]` in the sync log | Another VM pushed that branch to the SOT: `git pull sot <branch>`, then commit again |
+| Mirror dir exists but git errors | `aml-bootstrap --restore` moves it to `<mirror>.broken-<timestamp>` and re-clones |
+| `git checkout foo` says ambiguous | Both remotes have `foo`; `checkout.defaultRemote=origin` is set by the scripts - re-run `aml-bootstrap --restore` |
+| Slow git | You are in the SOT. `cd /mnt/mirror/REPO` |
 
 ## Best Practices
 
-### ✅ Do
-
-- **Always work in `/mnt/mirror/`** - it's fast
-- **Commit often** - worktree commits go to SOT's .git
-- **Push to remote regularly** - your ultimate backup
-- **Open IDEs in mirror** - cursor/code in /mnt/mirror/
-- **Run tests in mirror** - fast file I/O
-- **Create venvs in mirror** - .venv/ on local disk
-
-### ❌ Don't
-
-- **Don't edit files in SOT directly** - slow and laggy
-- **Don't rely only on /mnt** - always push to remote
-- **Don't create worktrees in /tmp** - ephemeral
-- **Don't forget to commit** - uncommitted work in mirror only
-
-## Example: arrive-aml Repository
-
-This repo uses the pattern:
-
-```bash
-# SOT (persistent)
-~/cloudfiles/rarko/main/arrive-aml/
-
-# Mirror (fast)
-/mnt/mirror/arrive-aml/
-
-# Daily workflow
-cd /mnt/mirror/arrive-aml
-git pull origin main
-git checkout -b feature/new-script
-
-# Make changes, test scripts
-bash scripts/setup-vm.sh --dry-run
-
-# Fast git operations
-git add scripts/
-git commit -m "Add new setup features"
-git push origin feature/new-script
-
-# Create PR from GitHub
-gh pr create --title "New setup features"
-```
-
-## Integration with CI/CD
-
-Your CI/CD can pull from the SOT:
-
-```yaml
-# .github/workflows/test.yml
-jobs:
-  test:
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          path: ~/cloudfiles/rarko/main/arrive-aml
-      
-      - name: Create fast worktree
-        run: |
-          cd ~/cloudfiles/rarko/main/arrive-aml
-          git worktree add /mnt/mirror/arrive-aml-ci
-      
-      - name: Run tests (fast!)
-        working-directory: /mnt/mirror/arrive-aml-ci
-        run: |
-          bash scripts/verify-setup.sh
-```
-
-## Automation Script
-
-Save as `scripts/lib/setup-mirror-worktree.sh`:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
-
-setup_mirror_worktree() {
-  local REPO_NAME="${1:-$(basename "$(pwd)")}"
-  local SOT="${HOME}/cloudfiles/rarko/main/${REPO_NAME}"
-  local MIRROR="/mnt/mirror/${REPO_NAME}"
-  
-  log_info "Setting up mirror worktree for: $REPO_NAME"
-  
-  # Ensure /mnt/mirror exists
-  sudo mkdir -p /mnt/mirror
-  sudo chown "$USER:$USER" /mnt/mirror
-  
-  # Check if SOT exists
-  if [ ! -d "$SOT/.git" ]; then
-    log_error "Source of Truth not found: $SOT"
-    log_info "Clone your repo there first:"
-    log_info "  mkdir -p ~/cloudfiles/rarko/main"
-    log_info "  cd ~/cloudfiles/rarko/main"
-    log_info "  git clone git@github.com:org/$REPO_NAME.git"
-    return 1
-  fi
-  
-  # Create or refresh worktree
-  if [ -d "$MIRROR" ]; then
-    log_warn "Mirror already exists: $MIRROR"
-    log_info "Remove it first: rm -rf $MIRROR"
-    return 1
-  fi
-  
-  log_info "Creating worktree..."
-  cd "$SOT"
-  git worktree add "$MIRROR"
-  
-  log_success "Mirror worktree created!"
-  echo
-  log_info "Source of Truth: $SOT"
-  log_info "Active Mirror:   $MIRROR"
-  echo
-  log_info "Next steps:"
-  log_info "  cd $MIRROR"
-  log_info "  cursor .  # or code ."
-  log_info "  git pull origin main"
-  echo
-  log_info "Test performance:"
-  log_info "  time git status  # Should be <1 second"
-}
-
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-  setup_mirror_worktree "$@"
-fi
-```
-
-## Summary
-
-**Persistent Mirror Worktree Pattern = Fast + Persistent + Simple**
-
-- 📁 SOT in `~/cloudfiles/rarko/main/` - persistent, backed up
-- ⚡ Mirror in `/mnt/mirror/` - fast local disk, persists across restarts
-- 🔗 Git worktree links them - shared database
-- 🚀 Work in mirror - 100x faster git operations
-- 💾 Push to remote - ultimate persistence
-- 🎯 Perfect for AI-driven iteration cycles
-
-**The result**: Smooth, fast development with full persistence and zero manual syncing.
+- Work only in `/mnt/mirror/REPO`; treat the SOT as a remote.
+- Commit often: uncommitted edits are the only thing a `/mnt` wipe can take.
+- `git push` to GitHub before stopping a VM you will not restart soon.
+- Never `git worktree prune` inside a SOT by hand (other instances may still have legacy registrations).
+- Open Cursor/VS Code (Remote-SSH) on `/mnt/mirror/REPO`, never on the share.

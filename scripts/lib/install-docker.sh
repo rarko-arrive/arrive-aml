@@ -22,7 +22,7 @@ install_docker() {
     sudo apt-get remove -y -qq docker docker-engine docker.io containerd runc 2>/dev/null || true
 
     log_info "Installing Docker prerequisites..."
-    sudo apt-get update -qq
+    apt_update_quiet
     sudo apt-get install -y -qq \
       ca-certificates \
       curl \
@@ -41,7 +41,7 @@ install_docker() {
       | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
     log_info "Installing Docker Engine..."
-    sudo apt-get update -qq
+    apt_update_quiet
     sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
     log_success "Docker Engine installed!"

@@ -29,6 +29,7 @@ INSTALL_VSCODE=false
 INSTALL_CURSOR=false
 DRY_RUN=false
 INTERACTIVE=false
+RUN_VERIFY=true
 
 # Parse command line arguments
 parse_args() {
@@ -75,6 +76,9 @@ parse_args() {
       --dry-run)
         DRY_RUN=true
         ;;
+      --no-verify)
+        RUN_VERIFY=false
+        ;;
       -h|--help)
         show_usage
         exit 0
@@ -119,9 +123,10 @@ Options:
   --disable-conda    Disable conda auto-activation
   --docker           Install Docker Engine and docker-compose
   --claude           Install Claude CLI
-  --vscode           Install Visual Studio Code
-  --cursor           Install Cursor Editor
+  --vscode           Check VS Code Remote-SSH server (desktop install only with a display)
+  --cursor           Check Cursor Remote-SSH server (desktop install only with a display)
   --dry-run          Show what would be installed without actually installing
+  --no-verify        Skip verify-setup.sh at the end (bootstrap.sh runs it itself)
   -h, --help         Show this help message
 
 Examples:
@@ -182,11 +187,11 @@ interactive_mode() {
     INSTALL_CLAUDE=true
   fi
 
-  if confirm "Install Visual Studio Code?"; then
+  if confirm "Check VS Code Remote-SSH server?"; then
     INSTALL_VSCODE=true
   fi
 
-  if confirm "Install Cursor Editor?"; then
+  if confirm "Check Cursor Remote-SSH server?"; then
     INSTALL_CURSOR=true
   fi
 
@@ -203,9 +208,9 @@ show_summary() {
   [ "$INSTALL_GITHUB_SSH" = true ] && echo "  ✓ GitHub SSH configuration"
   [ "$INSTALL_DISABLE_CONDA" = true ] && echo "  ✓ Disable conda auto-activation"
   [ "$INSTALL_DOCKER" = true ] && echo "  ✓ Docker Engine and docker-compose"
-  [ "$INSTALL_CLAUDE" = true ] && echo "  ✓ Claude CLI"
-  [ "$INSTALL_VSCODE" = true ] && echo "  ✓ Visual Studio Code"
-  [ "$INSTALL_CURSOR" = true ] && echo "  ✓ Cursor Editor"
+  [ "$INSTALL_CLAUDE" = true ] && echo "  ✓ Claude Code CLI"
+  [ "$INSTALL_VSCODE" = true ] && echo "  ✓ VS Code (Remote-SSH server check)"
+  [ "$INSTALL_CURSOR" = true ] && echo "  ✓ Cursor (Remote-SSH server check)"
   echo
 }
 
@@ -249,15 +254,15 @@ run_installation() {
 
   # Development tools
   if [ "$INSTALL_CLAUDE" = true ]; then
-    bash "$LIB_DIR/install-claude.sh" || log_warn "Claude CLI installation failed"
+    bash "$LIB_DIR/install-claude.sh" || log_warn "Claude Code installation failed"
   fi
 
   if [ "$INSTALL_VSCODE" = true ]; then
-    bash "$LIB_DIR/install-vscode.sh" || log_warn "VS Code installation failed"
+    bash "$LIB_DIR/install-vscode.sh" || log_warn "VS Code check failed"
   fi
 
   if [ "$INSTALL_CURSOR" = true ]; then
-    bash "$LIB_DIR/install-cursor.sh" || log_warn "Cursor installation failed"
+    bash "$LIB_DIR/install-cursor.sh" || log_warn "Cursor check failed"
   fi
 
   echo
@@ -297,24 +302,34 @@ main() {
 
   run_installation
 
+  if [ "$RUN_VERIFY" != true ]; then
+    return 0
+  fi
+
   # Run verification
   echo
   log_info "Running verification..."
+  local verify_rc=0
   if [ -f "$SCRIPT_DIR/verify-setup.sh" ]; then
-    bash "$SCRIPT_DIR/verify-setup.sh"
+    bash "$SCRIPT_DIR/verify-setup.sh" || verify_rc=$?
   else
     log_warn "Verification script not found"
   fi
 
   echo
   print_separator
-  log_success "Setup complete! Your Azure ML VM is ready."
+  if [ "$verify_rc" -eq 0 ]; then
+    log_success "Setup complete! Your Azure ML VM is ready."
+  else
+    log_warn "Setup finished but verification reported problems (fixes listed above)."
+  fi
   echo
   log_info "Next steps:"
-  log_info "  1. Log out and back in (or: source ~/.bashrc)"
-  log_info "  2. If you installed Docker, run: newgrp docker"
-  log_info "  3. Test git performance: cd ~/cloudfiles/code/Users/rarko/dev && time git status"
+  log_info "  1. Reload your shell: source ~/.bashrc"
+  log_info "  2. If Docker was just installed: newgrp docker"
+  log_info "  3. Repos, mirrors and venvs: bash scripts/bootstrap.sh   (or: aml-bootstrap)"
   print_separator
+  return "$verify_rc"
 }
 
 main "$@"

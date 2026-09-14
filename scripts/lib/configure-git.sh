@@ -6,7 +6,7 @@ set -euo pipefail
 # slow for git operations. These settings optimize git for network storage.
 #
 # Expected improvement: 2-4x faster git operations (10-30s → 7-8s)
-# For truly fast git (<1s), use worktree-helper.sh to work in /tmp
+# For truly fast git (<1s), work in the /mnt/mirror worktree (scripts/setup-repos.sh)
 # Safe to run multiple times (idempotent)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,8 +62,23 @@ configure_git_performance() {
   log_info "Applying aggressive network mount optimizations..."
   git config --global core.checkStat minimal
   git config --global core.trustctime false
-  git config --global core.ignoreStat true
   git config --global status.showUntrackedFiles no
+
+  # NEVER set core.ignoreStat=true: it marks every tracked file assume-unchanged,
+  # so edits made by editors/scripts become invisible to `git status`, `git add -A`
+  # and `git commit -a` (this silently dropped changes on earlier VMs).
+  git config --global core.ignoreStat false
+
+  # The cloudfiles mount is root-owned (CIFS): without this git refuses to touch
+  # any repo there ("detected dubious ownership").
+  log_info "Trusting repositories on the cloudfiles mount..."
+  if ! git config --global --get-all safe.directory 2>/dev/null | grep -qx '\*'; then
+    git config --global --add safe.directory '*'
+  fi
+
+  # Quality of life for feature-branch workflows in the mirrors
+  git config --global push.autoSetupRemote true
+  git config --global init.defaultBranch main
 
   # Configure user (if not already set)
   if [ -z "$(git config --global user.name 2>/dev/null || true)" ]; then
@@ -78,8 +93,7 @@ configure_git_performance() {
 
   log_success "Git performance configuration complete!"
   log_warn "Note: Untracked files hidden by default (use 'git status -u' to show)"
-  log_info "Expected: ~7-8s on network mount (down from 10-30s)"
-  log_info "For sub-second git: use scripts/lib/worktree-helper.sh to work in /tmp"
+  log_info "Expected: ~7-8s on the network mount (down from 10-30s); <1s in /mnt/mirror worktrees"
   echo
 }
 
@@ -89,7 +103,6 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 
   print_separator
   echo "Git configuration applied. Test performance with:"
-  echo "  cd ~/cloudfiles/code/Users/rarko/dev/arrive-aml"
-  echo "  time git status  # Should be < 1 second"
+  echo "  cd /mnt/mirror/arrive-aml && time git status   # < 1 second"
   print_separator
 fi
