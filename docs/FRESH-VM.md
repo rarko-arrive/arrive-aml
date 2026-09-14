@@ -74,7 +74,7 @@ bash scripts/setup-azureml-ssh.sh    # from your local arrive-aml clone
 ```
 
 Remote-SSH to the VM and open `/mnt/mirror/<repo>`. Cursor/VS Code install their server
-component on the VM automatically. Details: [docs/SSH-SETUP-FROM-LAPTOP.md](docs/SSH-SETUP-FROM-LAPTOP.md).
+component on the VM automatically. Details: [SSH-SETUP-FROM-LAPTOP.md](SSH-SETUP-FROM-LAPTOP.md).
 
 ## 5. Work
 
@@ -133,7 +133,7 @@ and the restore runs on every start without you.
 
 ## Next
 
-- [QUICKSTART.md](QUICKSTART.md) - one-page cheat sheet
-- [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md) - why SOT + mirror works
-- [docs/REPOS-CONFIG.md](docs/REPOS-CONFIG.md) - adding repos
-- [CLAUDE-SETUP.md](CLAUDE-SETUP.md) - Claude Code + skills
+- [README.md](../README.md) - the one-page happy path
+- [docs/MIRROR-PATTERN.md](MIRROR-PATTERN.md) - why SOT + mirror works
+- [REPOS-CONFIG.md](REPOS-CONFIG.md) - adding repos
+- [docs/CLAUDE-CODE.md](CLAUDE-CODE.md) - Claude Code + skills

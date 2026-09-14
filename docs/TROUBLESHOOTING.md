@@ -1,6 +1,6 @@
-# Setup details
+# Troubleshooting
 
-README is the happy path. This page covers troubleshooting and Azure ML.
+[README.md](../README.md) is the happy path and [WORKFLOW.md](WORKFLOW.md) the full loop. This page covers the odd cases: Cursor/VS Code, notebooks, kernels, SSH.
 
 ## Cursor notebooks won’t run (but VS Code does)
 
@@ -95,13 +95,13 @@ The script will ask for alias / IP / port / PEM path, then:
 - write a gitignored copy at `.ssh/config` in this repo
 - test `ssh <alias>`
 
-Prefer editing [`.ssh/config.example`](.ssh/config.example) by hand? Copy to `.ssh/config`, fill placeholders, then still run the script (or paste the `Host` block into `~/.ssh/config` yourself).
+Prefer editing [`.ssh/config.example`](../.ssh/config.example) by hand? Copy to `.ssh/config`, fill placeholders, then still run the script (or paste the `Host` block into `~/.ssh/config` yourself).
 
 ### C. Cursor Remote SSH settings (required for this demo)
 
 Plain `ssh YOUR-CI-ALIAS` can work while **Cursor** still fails. Cursor’s Remote SSH (`anysphere.remote-ssh`) installs a remote server over a SOCKS tunnel; that path is flaky on Azure ML after Cursor updates, even when VS Code Remote SSH works on the same host.
 
-Merge [`.cursor/remote-ssh.settings.example.json`](.cursor/remote-ssh.settings.example.json) into **Cursor User settings** (`Cmd+,` → open the JSON). Replace `YOUR-CI-ALIAS` with your Host alias (e.g. `rarko1`):
+Merge [`.cursor/remote-ssh.settings.example.json`](../.cursor/remote-ssh.settings.example.json) into **Cursor User settings** (`Cmd+,` → open the JSON). Replace `YOUR-CI-ALIAS` with your Host alias (e.g. `rarko1`):
 
 ```json
 {

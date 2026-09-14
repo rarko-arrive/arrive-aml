@@ -157,7 +157,7 @@ main() {
   if sot_base="$(detect_sot_base)"; then
     log_success "SOT base: $sot_base"
   else
-    fail "SOT base not found (expected ~/cloudfiles/code/Users/<you>/main/arrive-aml)" "see HAPPY-PATH.md"
+    fail "SOT base not found (expected ~/cloudfiles/code/Users/<you>/main/arrive-aml)" "see docs/FRESH-VM.md"
     sot_base=""
   fi
   if [ -d "$MIRROR_BASE" ]; then

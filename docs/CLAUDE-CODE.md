@@ -67,5 +67,5 @@ and run `bash scripts/lib/install-claude-skills.sh`.
 ## Resources
 
 - Skills library: https://github.com/rarko-arrive/azureml-skills
-- Worktree pattern: [docs/AZUREML-WORKTREE-PATTERN.md](docs/AZUREML-WORKTREE-PATTERN.md)
-- Setup: [README.md](README.md), [HAPPY-PATH.md](HAPPY-PATH.md)
+- Worktree pattern: [docs/MIRROR-PATTERN.md](MIRROR-PATTERN.md)
+- Setup: [README.md](../README.md), [FRESH-VM.md](FRESH-VM.md)

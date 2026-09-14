@@ -14,4 +14,4 @@ bash scripts/setup-azureml-ssh.sh
 
 Then merge [../.cursor/remote-ssh.settings.example.json](../.cursor/remote-ssh.settings.example.json) into **Cursor User settings** (alias → `remotePlatform` + `remoteServerListenOnSocket`). Plain `ssh` working is not enough — Cursor needs those User settings for Azure ML.
 
-Full walkthrough + troubleshooting: [../Setup.md](../Setup.md#connect-to-azure-ml-from-cursor).
+Full walkthrough + troubleshooting: [../docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md#connect-to-azure-ml-from-cursor).

@@ -206,6 +206,6 @@ echo "  3. Cmd+Shift+P → Remote-SSH: Connect to Host… → ${HOST_ALIAS}"
 echo "  4. Open your project folder on the VM (or clone the repo there)"
 echo "  5. Use Agent on the right — it runs against the remote workspace"
 echo
-echo "If Cursor fails with Connection reset by peer but ssh works, see Setup.md"
+echo "If Cursor fails with Connection reset by peer but ssh works, see docs/TROUBLESHOOTING.md"
 echo "Quick check anytime:  ssh ${HOST_ALIAS}"
 echo "=================================================================="

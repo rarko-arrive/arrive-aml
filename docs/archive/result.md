@@ -5,7 +5,7 @@
 ### New Documentation Files:
 1. **HAPPY-PATH.md** ← **Start here!** Complete 10-minute setup guide
 2. **AZURE-ML-PATHS.md** - Path structure explanation
-3. **CLAUDE-SETUP.md** - Claude Code integration
+3. **docs/CLAUDE-CODE.md** - Claude Code integration
 4. **instruct.md** - Publishing instructions
 5. **docs/REPOS-CONFIG.md** - Repository configuration guide
 
@@ -79,7 +79,7 @@ bash scripts/setup-repos.sh
 ## 📖 Key Documentation to Read
 
 1. **HAPPY-PATH.md** - Follow this for complete setup
-2. **CLAUDE-SETUP.md** - Install Claude Code + skills
+2. **docs/CLAUDE-CODE.md** - Install Claude Code + skills
 3. **AZURE-ML-PATHS.md** - Understand the path structure
 4. **docs/REPOS-CONFIG.md** - Customize repository list
 

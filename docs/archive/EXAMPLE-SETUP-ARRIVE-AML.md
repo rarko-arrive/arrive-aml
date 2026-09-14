@@ -1,5 +1,5 @@
 > **Note (2026-09):** mirrors are now full local clones with the SOT as remote `sot`
-> (see [AZUREML-WORKTREE-PATTERN.md](AZUREML-WORKTREE-PATTERN.md)). Where this walkthrough shows
+> (see [MIRROR-PATTERN.md](../MIRROR-PATTERN.md)). Where this walkthrough shows
 > `git worktree add/remove/prune` against `/mnt/mirror/<repo>`, use `aml-bootstrap --restore`
 > or `bash scripts/lib/setup-mirror-worktree.sh <repo>` instead. Never `git worktree prune` in a SOT.
 

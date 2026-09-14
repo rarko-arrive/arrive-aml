@@ -129,7 +129,7 @@ main() {
   local sot_base
   if ! sot_base="$(detect_sot_base)"; then
     log_error "Could not determine the SOT base. Expected: ~/cloudfiles/code/Users/<you>/main/arrive-aml"
-    log_info "Move this clone there (see HAPPY-PATH.md) or export ARRIVE_SOT_BASE=/path/to/main"
+    log_info "Move this clone there (see docs/FRESH-VM.md) or export ARRIVE_SOT_BASE=/path/to/main"
     exit 1
   fi
   log_info "SOT base: $sot_base"

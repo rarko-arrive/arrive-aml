@@ -57,9 +57,15 @@ scripts/
     └── worktree-helper.sh   # Legacy /tmp copy helper (superseded by mirrors)
 
 docs/
-├── AZUREML-WORKTREE-PATTERN.md  # Deep dive on worktree architecture
-├── REPOS-CONFIG.md              # How to configure repos.conf
-└── *.md                         # Setup guides
+├── WORKFLOW.md          # THE page scientists repeat: setup, restore, per-PR loop, fixes, why
+├── FRESH-VM.md          # Step-by-step first setup (new VM / new user / startup script)
+├── MIRROR-PATTERN.md    # SOT + local clone design with measurements
+├── REPOS-CONFIG.md      # repos.conf
+├── CLAUDE-CODE.md       # Claude Code + skills.conf
+├── PATHS.md             # Azure ML mount layout
+├── TROUBLESHOOTING.md   # Cursor/VS Code/notebook/SSH oddities
+├── SSH-SETUP-FROM-LAPTOP.md, REUSE-SSH-KEY.md
+└── archive/             # historical narratives (not maintained)
 ```
 
 ## Repository Configuration System
@@ -175,7 +181,7 @@ When modifying setup scripts:
 2. Test individual pieces: `bash scripts/lib/install-docker.sh`, `bash scripts/setup-repos.sh --only arrive-ds`
 3. Verify with: `bash scripts/verify-setup.sh` (exit 1 only on required failures)
 4. Test the restart path: `bash scripts/bootstrap.sh --restore`
-5. Test happy path: `bash test-happy-path.sh`
+5. Docs: README.md is the one-screen happy path; anything longer goes under `docs/` and is linked from the README table
 
 ## Integration Points
 
@@ -193,13 +199,12 @@ When modifying setup scripts:
 
 ## Documentation Hierarchy
 
-- **summary.md**: THE workflow every scientist repeats (fresh VM, after restart, per-PR loop, troubleshooting, why it is built this way)
-- **README.md**: User-facing quick start
-- **QUICKSTART.md**: One-page copy-paste guide (bootstrap + restore + daily workflow)
-- **HAPPY-PATH.md**: Step-by-step setup for fresh VM, including the startup-script option
-- **CLAUDE-SETUP.md**: Claude Code extension + skills integration
-- **AZURE-ML-PATHS.md**: Path structure explanation
-- **docs/AZUREML-WORKTREE-PATTERN.md**: Deep technical dive on worktree pattern
-- **Setup.md**: Detailed troubleshooting
+- **README.md**: one screen - the command, the restore, the daily loop, a table linking to docs/
+- **docs/WORKFLOW.md**: the canonical page every scientist repeats per PR (setup, restore, loop, self-checks, all fixes, why it is built this way)
+- **docs/FRESH-VM.md**: step-by-step for a new VM / new user, incl. the Azure ML startup-script option
+- **docs/MIRROR-PATTERN.md**: SOT + local clone architecture with the measurements behind it
+- **docs/REPOS-CONFIG.md**, **docs/CLAUDE-CODE.md**: repos.conf and skills.conf
+- **docs/PATHS.md**, **docs/TROUBLESHOOTING.md**, **docs/SSH-SETUP-FROM-LAPTOP.md**, **docs/REUSE-SSH-KEY.md**
+- **docs/archive/**: superseded narratives kept for history; do not update, do not link
 
-Read AZUREML-WORKTREE-PATTERN.md for complete architectural understanding of the mirror pattern.
+Read docs/MIRROR-PATTERN.md for complete architectural understanding of the mirror pattern.

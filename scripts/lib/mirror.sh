@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mirror helpers - source this file (it does not run anything).
 #
-# Pattern (see docs/AZUREML-WORKTREE-PATTERN.md):
+# Pattern (see docs/MIRROR-PATTERN.md):
 #   SOT     ~/cloudfiles/code/Users/<you>/main/REPO   persistent Azure Files share, slow
 #           (60-95 ms per file operation), shared by ALL of your compute instances.
 #           Holds the full .git database, checked out on the default branch and kept
