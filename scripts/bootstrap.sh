@@ -7,7 +7,7 @@ set -euo pipefail
 #   bash ~/cloudfiles/code/Users/<you>/main/arrive-aml/scripts/bootstrap.sh
 #
 # What it does
-#   1. tools     scripts/setup-vm.sh --all   (git tuning, uv, gh, GitHub SSH, Docker, Claude Code)
+#   1. tools     scripts/setup-vm.sh --all   (git tuning, uv, gh, GitHub SSH, Docker, cloudflared, Claude Code)
 #   2. shell     ~/.bashrc block, ~/.config/arrive-aml/env, `aml-bootstrap` command
 #   3. repos     clone repos.conf into the SOT, local mirror clones on /mnt/mirror (auto-synced to SOT), uv venvs
 #   4. skills    team Claude Code skills from skills.conf -> ~/.claude/skills

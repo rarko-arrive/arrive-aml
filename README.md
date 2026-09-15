@@ -1,7 +1,7 @@
 # arrive-aml
 
 **One command turns an Azure ML compute instance into the Arrive data-science workbench.**
-Tuned git, uv, GitHub CLI + SSH, Docker, Claude Code with the team skills, and every team repo
+Tuned git, uv, GitHub CLI + SSH, Docker, cloudflared, Claude Code with the team skills, and every team repo
 ready to work on: persistent copy on the share, fast local mirror on `/mnt`, uv venv per repo.
 
 ## Set up a VM
@@ -74,7 +74,7 @@ Everything is idempotent and runs standalone; `bootstrap.sh` just runs them in o
 | Script | Does |
 |---|---|
 | `scripts/bootstrap.sh` | the one command (`--restore`, `--dry-run`, `--skip-tools/-repos/-venvs/-skills`) |
-| `scripts/setup-vm.sh --all` | tools: git tuning, uv, gh, GitHub SSH, Docker, Claude Code |
+| `scripts/setup-vm.sh --all` | tools: git tuning, uv, gh, GitHub SSH, Docker, cloudflared, Claude Code |
 | `scripts/setup-repos.sh` | `repos.conf` → SOT clone, mirror clone + sync hooks, uv venv (`--only NAME`) |
 | `scripts/verify-setup.sh` | every check, every fix; exit 1 only on required failures |
 | `scripts/lib/*.sh` | one concern each: `configure-git.sh`, `configure-github-ssh.sh`, `setup-python-venv.sh`, `install-claude-skills.sh`, ... |

@@ -36,7 +36,7 @@ What happens (all idempotent, re-run any time):
 
 | Step | What | Where it lands |
 |------|------|----------------|
-| 1 | git tuned for the network mount, uv, gh, GitHub SSH key, Docker, Claude Code | OS disk (persists) |
+| 1 | git tuned for the network mount, uv, gh, GitHub SSH key, Docker, cloudflared, Claude Code | OS disk (persists) |
 | 2 | `aml-bootstrap` command, `~/.config/arrive-aml/env`, bashrc block | OS disk |
 | 3 | every repo in `repos.conf` cloned to the SOT, local mirror clone (+ SOT sync hooks), uv venv | SOT: cloudfiles. Mirror + venv: `/mnt` |
 | 4 | team Claude Code skills (`skills.conf`) linked into `~/.claude/skills` | OS disk |

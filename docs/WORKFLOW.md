@@ -51,7 +51,7 @@ What `bootstrap.sh` does, in order, and where it lands:
 
 | Step | What | Persists? |
 |---|---|---|
-| 1 tools | git tuned for the share, uv, gh, GitHub SSH key (uploaded via gh), Docker, Claude Code | yes (OS disk) |
+| 1 tools | git tuned for the share, uv, gh, GitHub SSH key (uploaded via gh), Docker, cloudflared, Claude Code | yes (OS disk) |
 | 2 shell | `aml-bootstrap` command, `~/.config/arrive-aml/env`, one managed block in `~/.bashrc` | yes |
 | 3 repos | every repo in `repos.conf`: SOT clone → mirror clone → `uv sync` venv + `.venv` symlink | SOT yes; mirror + venv **no** |
 | 4 skills | every repo in `skills.conf` → `~/.claude/skills/<skill>` (e.g. `/work-in-repo`) | yes |
@@ -172,6 +172,7 @@ reports commits that never reached the SOT (`git push sot HEAD` retries).
 | git does not see my edits | old `core.ignoreStat=true` flagged files assume-unchanged | `aml-bootstrap` (clears it), or `git ls-files -z \| git update-index -z --no-assume-unchanged --stdin` |
 | `uv sync` fails: "Unable to determine which files to ship" | repo is not a package but declares a build backend | add `[tool.uv] package = false` to `pyproject.toml` |
 | `claude: command not found` | not installed / PATH | `bash scripts/lib/install-claude.sh && source ~/.bashrc` |
+| `cloudflared: command not found` | not installed / PATH | `bash scripts/lib/install-cloudflared.sh && source ~/.bashrc` |
 | `/work-in-repo` not found | skills not linked | `bash scripts/lib/install-claude-skills.sh`, restart Claude Code |
 | OS disk > 90% | legacy venvs, old editor servers | `rm -rf ~/uv-venvs` (13 GB; venvs are in `/mnt/uv-venvs` now), prune `~/.vscode-server/cli/servers/` |
 | `Could not determine the SOT base` | arrive-aml not under `~/cloudfiles/code/Users/<you>/main/` | move it there, or `export ARRIVE_SOT_BASE=...` |

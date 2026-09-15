@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Purpose
 
-This is **arrive-aml**: an Azure ML compute instance setup automation system. One command (`scripts/bootstrap.sh`) transforms a fresh Ubuntu compute instance into a fully-configured data-science environment: optimized git, uv, Docker, GitHub CLI + SSH, Claude Code + team skills, and every team repo cloned to persistent storage with a fast `/mnt/mirror` worktree and a local-disk uv venv.
+This is **arrive-aml**: an Azure ML compute instance setup automation system. One command (`scripts/bootstrap.sh`) transforms a fresh Ubuntu compute instance into a fully-configured data-science environment: optimized git, uv, Docker, cloudflared, GitHub CLI + SSH, Claude Code + team skills, and every team repo cloned to persistent storage with a fast `/mnt/mirror` worktree and a local-disk uv venv.
 
 ## Critical Architecture: Persistent Mirror Worktree Pattern
 
@@ -53,7 +53,7 @@ scripts/
     ├── install-claude.sh    # Claude Code CLI via official installer (npm fallback)
     ├── install-claude-skills.sh # skills.conf repos → ~/.claude/skills symlinks
     ├── install-vscode.sh / install-cursor.sh  # Detect Remote-SSH servers; desktop install is opt-in
-    ├── install-*.sh         # docker, gh, uv, system tools
+    ├── install-*.sh         # docker, cloudflared, gh, uv, system tools
     └── worktree-helper.sh   # Legacy /tmp copy helper (superseded by mirrors)
 
 docs/
