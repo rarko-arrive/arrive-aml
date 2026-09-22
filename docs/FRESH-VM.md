@@ -92,16 +92,17 @@ reports any commit whose push did not make it (`git push sot HEAD` to retry).
 
 ## After a VM stop/start
 
-`/mnt` is Azure's ephemeral resource disk and comes back empty. Your shell will remind you:
+`/mnt` is Azure's ephemeral resource disk and comes back empty. SSH in: the login shell
+recreates mirrors, venvs, and skills, then prints `✓ Ready`. To run that yourself:
 
 ```bash
-aml-bootstrap --restore    # recreates mirrors + venvs, refreshes skills, verifies
+aml-bootstrap --restore
 ```
 
-Optional: paste the same line into the compute instance's **startup script** (Azure ML studio ->
+Optional: paste the same command into the compute instance's **startup script** (Azure ML studio ->
 Compute -> your instance -> Startup script) as
 `sudo -u azureuser -H bash /home/azureuser/cloudfiles/code/Users/rarko/main/arrive-aml/scripts/bootstrap.sh --restore`
-and the restore runs on every start without you.
+and the restore finishes on every start, before you connect.
 
 ## Layout you end up with
 

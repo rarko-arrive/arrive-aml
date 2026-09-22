@@ -77,26 +77,26 @@ the VM to `~/.ssh/config`. Then Cursor / VS Code → Remote-SSH → the VM → o
 
 ## 2. After every VM stop/start (~1-2 min)
 
-`/mnt` comes back empty. Your shell tells you:
-
-```
-⚠ /mnt/mirror is missing (VM restarted?). Restore mirrors + venvs with:  aml-bootstrap --restore
-```
+`/mnt` comes back empty. **Just SSH in.** The first interactive shell sees that the mirrors are
+gone, fast-forwards `arrive-aml` itself when that checkout is clean, then re-clones every mirror
+(GitHub first, SOT if offline), fetches the branches that exist only in the SOT, rebuilds the
+venvs, refreshes skills and verifies. A second terminal opened while that is running waits, then
+gets the same `✓ Ready` line. You do not type a restore command.
 
 ```bash
-aml-bootstrap --restore
+aml-bootstrap --restore    # same thing, if you want it finished before you connect, or the login restore failed
 ```
 
-This re-clones every mirror (GitHub first, SOT if offline), adds the `sot` remote, fetches the
-branches that exist only in the SOT, rebuilds the venvs, refreshes skills and verifies.
+Set `ARRIVE_NO_AUTO_RESTORE=1` in `~/.config/arrive-aml/env` if you want the old manual behavior.
 
-**Zero-touch option:** in Azure ML studio → Compute → your instance → *Startup script*, set
+**Already done before you connect:** in Azure ML studio → Compute → your instance → *Startup script*, set
 
 ```
 sudo -u azureuser -H bash /home/azureuser/cloudfiles/code/Users/<you>/main/arrive-aml/scripts/bootstrap.sh --restore
 ```
 
-and the restore runs on every start before you log in. (`crontab` is not permitted for `azureuser`.)
+and the restore runs on every start, so the login shell finds the mirrors and stays quiet.
+(`crontab` is not permitted for `azureuser`.)
 
 ---
 
@@ -165,7 +165,7 @@ reports commits that never reached the SOT (`git push sot HEAD` retries).
 | Symptom | Cause | Fix |
 |---|---|---|
 | git is slow | you are in the SOT | `cd /mnt/mirror/<repo>` |
-| `/mnt/mirror` missing | VM restarted | `aml-bootstrap --restore` |
+| `/mnt/mirror` missing | VM restarted, and this shell did not restore it | `aml-bootstrap --restore` (or open a new login; it runs on its own) |
 | `FAIL ... -> sot` in the sync log | share unmounted, or another VM pushed first | `git push sot HEAD`, or `git pull sot <branch>` then commit |
 | `Permission denied (publickey)` | key not on GitHub / gh not logged in | `gh auth login` then `bash scripts/lib/configure-github-ssh.sh` |
 | `detected dubious ownership` | share is root-owned | `bash scripts/lib/configure-git.sh` (sets `safe.directory *`) |
@@ -231,7 +231,8 @@ Investigation on `rarko1` found:
 | `scripts/verify-setup.sh` | required vs optional checks, prints fixes |
 | `scripts/lib/mirror.sh` | mirror clone, `sot` remote, sync hooks, legacy migration |
 | `scripts/lib/configure-git.sh` | share-tuned git settings, `safe.directory *`, `push.autoSetupRemote` |
-| `scripts/lib/configure-shell.sh` | bashrc block, env file, `aml-bootstrap` |
+| `scripts/lib/configure-shell.sh` | bashrc block, env file, `aml-bootstrap`, quiet conda + idle timeout |
+| `scripts/lib/login-restore.sh` | sourced by bashrc: restores `/mnt` after a restart |
 | `scripts/lib/setup-python-venv.sh` | `uv sync` into `/mnt/uv-venvs/<repo>` + `.venv` symlink |
 | `scripts/lib/install-claude-skills.sh` | skills.conf → `~/.claude/skills` |
 | `repos.conf`, `skills.conf` | what gets installed on every VM |

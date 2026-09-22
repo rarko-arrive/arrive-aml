@@ -29,7 +29,7 @@ Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) via SMB/CIFS,
 
 **Key insight**: the mirror is plain git - a local clone with two remotes. Every commit is pushed to the SOT's `.git` by a hook within seconds, so the persistent copy is always current, and `git push` goes to GitHub as usual. Measured on rarko1: `git status` 5.4 s in the SOT, 3.0 s in a linked worktree (its index/HEAD/refs still live on the share, 60-95 ms per file op), 0.005 s in the clone. That is why linked worktrees were dropped; `mirror.sh` migrates legacy worktree mirrors automatically and removes their registrations from the SOT.
 
-`/mnt` wipes are expected: `aml-bootstrap --restore` re-clones (GitHub first, SOT fallback), fetches the branches only the SOT has, and rebuilds venvs. Only uncommitted edits (and commits whose background push failed - `verify-setup.sh` reports those) can be lost.
+`/mnt` wipes are expected: the next interactive login runs `aml-bootstrap --restore`, which re-clones (GitHub first, SOT fallback), fetches the branches only the SOT has, and rebuilds venvs. Only uncommitted edits (and commits whose background push failed - `verify-setup.sh` reports those) can be lost.
 
 ## Directory Structure
 
@@ -156,7 +156,7 @@ All scripts in `scripts/lib/` are:
 
 ## Key Non-Obvious Patterns
 
-1. **/mnt is ephemeral** - `/mnt` is Azure's resource disk (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`); mirrors, venvs and the uv cache vanish on every stop/start. Commits are safe once the sync hook pushed them to the SOT (seconds). `aml-bootstrap --restore` recreates everything; the bashrc block prints a reminder when `/mnt/mirror` is missing. The SOT is shared by all of the user's compute instances (it is a plain repo on `main`, acting as a local remote that also updates its working tree on push).
+1. **/mnt is ephemeral** - `/mnt` is Azure's resource disk (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`); mirrors, venvs and the uv cache vanish on every stop/start. Commits are safe once the sync hook pushed them to the SOT (seconds). The bashrc block sources `scripts/lib/login-restore.sh`, which runs `aml-bootstrap --restore` when the mirrors are missing (one restore at a time; a failure backs off for 10 minutes). Bootstrap also fast-forwards a clean arrive-aml checkout from origin before doing the work, then re-execs so it runs the scripts just pulled. The SOT is shared by all of the user's compute instances (it is a plain repo on `main`, acting as a local remote that also updates its working tree on push).
 
 2. **Parallel branches** - the mirror is a normal clone, so `git worktree add /mnt/mirror/arrive-aml-feature1 feature/one` from the mirror works and stays fully local (its admin files live in the mirror's `.git`, not on the share).
 
@@ -164,7 +164,7 @@ All scripts in `scripts/lib/` are:
 
 4. **SSH key naming** - Uses `id_ed25519_github` (not default `id_ed25519`) to avoid conflicts with other SSH keys. Configured in `~/.ssh/config`.
 
-5. **Conda is disabled, not removed** - `scripts/lib/disable-conda.sh` comments out conda init in bashrc but keeps installation intact (Azure ML managed).
+5. **Conda is disabled, not removed** - `scripts/lib/disable-conda.sh` comments out conda init and any leftover `conda activate` line in bashrc (Azure leaves `conda activate azureml_py38` outside the init block; commenting out only the init block takes conda off PATH and the next login errors). The Anaconda install stays. `configure-shell.sh` also removes Azure's duplicate `readonly TMOUT=900` so login does not error and idle SSH sessions are not killed after 15 minutes.
 
 6. **Compute instances are headless** - Cursor and VS Code run on the laptop and connect via Remote-SSH; their servers self-install under `~/.cursor-server` / `~/.vscode-server`. `install-cursor.sh` / `install-vscode.sh` only detect those servers (desktop installs are opt-in flags).
 

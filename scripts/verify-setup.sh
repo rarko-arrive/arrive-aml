@@ -169,7 +169,7 @@ main() {
   if [ -d "$MIRROR_BASE" ]; then
     log_success "Mirror base: $MIRROR_BASE"
   else
-    fail "$MIRROR_BASE missing (VM restarted? /mnt is wiped on stop/start)" "aml-bootstrap --restore"
+    fail "$MIRROR_BASE missing (VM restarted? /mnt is wiped on stop/start; a new login restores it)" "aml-bootstrap --restore"
   fi
   if [ -n "$sot_base" ] && [ -f "${ARRIVE_ROOT}/repos.conf" ]; then
     local url name mirror sot mir

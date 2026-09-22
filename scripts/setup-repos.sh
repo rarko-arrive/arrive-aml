@@ -148,7 +148,7 @@ setup_repos() {
   done
   echo
   echo "Every commit in a mirror is pushed to the SOT in the background (log: ~/.local/state/arrive-aml/sot-sync.log)."
-  echo "After a VM restart (/mnt wiped):  aml-bootstrap --restore"
+  echo "After a VM restart (/mnt wiped): login restores mirrors automatically (or: aml-bootstrap --restore)"
   print_separator
   [ "$failed" -eq 0 ]
 }
