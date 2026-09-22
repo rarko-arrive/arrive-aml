@@ -114,6 +114,12 @@ main() {
   fi
   echo
 
+  log_info "=== Tunnels ==="
+  if check_command cloudflared "cloudflared" "bash scripts/lib/install-cloudflared.sh"; then
+    log_info "  $(cloudflared --version 2>/dev/null | head -n1)"
+  fi
+  echo
+
   log_info "=== Claude Code ==="
   if check_command claude "Claude Code" "bash scripts/lib/install-claude.sh"; then
     log_info "  $(claude --version 2>/dev/null || echo installed)"

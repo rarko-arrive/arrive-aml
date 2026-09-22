@@ -24,6 +24,7 @@ INSTALL_GH=false
 INSTALL_GITHUB_SSH=false
 INSTALL_DISABLE_CONDA=false
 INSTALL_DOCKER=false
+INSTALL_CLOUDFLARED=false
 INSTALL_CLAUDE=false
 INSTALL_VSCODE=false
 INSTALL_CURSOR=false
@@ -64,6 +65,9 @@ parse_args() {
       --docker)
         INSTALL_DOCKER=true
         ;;
+      --cloudflared)
+        INSTALL_CLOUDFLARED=true
+        ;;
       --claude)
         INSTALL_CLAUDE=true
         ;;
@@ -101,6 +105,7 @@ parse_args() {
     INSTALL_GITHUB_SSH=true
     INSTALL_DISABLE_CONDA=true
     INSTALL_DOCKER=true
+    INSTALL_CLOUDFLARED=true
     INSTALL_CLAUDE=true
     INSTALL_VSCODE=true
     INSTALL_CURSOR=true
@@ -122,6 +127,7 @@ Options:
   --github-ssh       Configure GitHub SSH authentication
   --disable-conda    Disable conda auto-activation
   --docker           Install Docker Engine and docker-compose
+  --cloudflared      Install cloudflared (Cloudflare tunnel client)
   --claude           Install Claude CLI
   --vscode           Check VS Code Remote-SSH server (desktop install only with a display)
   --cursor           Check Cursor Remote-SSH server (desktop install only with a display)
@@ -183,6 +189,10 @@ interactive_mode() {
     INSTALL_DOCKER=true
   fi
 
+  if confirm "Install cloudflared (public HTTPS tunnels)?"; then
+    INSTALL_CLOUDFLARED=true
+  fi
+
   if confirm "Install Claude CLI?"; then
     INSTALL_CLAUDE=true
   fi
@@ -208,6 +218,7 @@ show_summary() {
   [ "$INSTALL_GITHUB_SSH" = true ] && echo "  ✓ GitHub SSH configuration"
   [ "$INSTALL_DISABLE_CONDA" = true ] && echo "  ✓ Disable conda auto-activation"
   [ "$INSTALL_DOCKER" = true ] && echo "  ✓ Docker Engine and docker-compose"
+  [ "$INSTALL_CLOUDFLARED" = true ] && echo "  ✓ cloudflared (Cloudflare tunnel)"
   [ "$INSTALL_CLAUDE" = true ] && echo "  ✓ Claude Code CLI"
   [ "$INSTALL_VSCODE" = true ] && echo "  ✓ VS Code (Remote-SSH server check)"
   [ "$INSTALL_CURSOR" = true ] && echo "  ✓ Cursor (Remote-SSH server check)"
@@ -250,6 +261,10 @@ run_installation() {
   # Docker
   if [ "$INSTALL_DOCKER" = true ]; then
     bash "$LIB_DIR/install-docker.sh" || log_error "Docker installation failed"
+  fi
+
+  if [ "$INSTALL_CLOUDFLARED" = true ]; then
+    bash "$LIB_DIR/install-cloudflared.sh" || log_error "cloudflared installation failed"
   fi
 
   # Development tools
