@@ -23,7 +23,7 @@ install_vscode_desktop() {
     return 1
   fi
   log_info "Adding Microsoft GPG key and repository..."
-  sudo apt-get install -y -qq wget gpg
+  apt_get install -y -qq wget gpg
   wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
   sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
   rm -f packages.microsoft.gpg
@@ -31,7 +31,7 @@ install_vscode_desktop() {
     | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
   log_info "Installing code..."
   apt_update_quiet
-  sudo apt-get install -y -qq code
+  apt_get install -y -qq code
   if ! command -v code >/dev/null 2>&1; then
     log_error "VS Code installation failed"
     return 1

@@ -252,10 +252,54 @@ wait_for_path() {
   return 0
 }
 
+# Run apt-get, waiting while another apt/dpkg holds the lock.
+# Azure ML often runs apt in the background right after boot; failing the
+# whole bootstrap on that lock is a false error when the tools are already there.
+# Usage: apt_get update -qq
+#        apt_get install -y -qq git curl
+apt_get() {
+  local attempt=0
+  local max_attempts=90 # 90 * 5s = 7.5 minutes
+  local err rc holder
+  while true; do
+    err="$(mktemp)"
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get "$@" >"$err" 2>&1; then
+      if [ "${1:-}" = "update" ]; then
+        # The Azure ML image ships duplicate apt sources; those warnings are noise.
+        grep -Ev '^W: ' "$err" >&2 || true
+      else
+        cat "$err"
+      fi
+      rm -f "$err"
+      return 0
+    fi
+    rc=$?
+    if grep -qE 'Could not get lock|Unable to lock directory|Unable to acquire the dpkg frontend lock|is another process using it' "$err"; then
+      attempt=$((attempt + 1))
+      if [ "$attempt" -ge "$max_attempts" ]; then
+        cat "$err" >&2
+        rm -f "$err"
+        log_error "apt stayed locked for $((max_attempts * 5 / 60)) minutes"
+        return "$rc"
+      fi
+      if [ "$attempt" -eq 1 ] || [ $((attempt % 6)) -eq 0 ]; then
+        holder="$(sed -n 's/.*held by process \([0-9][0-9]*\) (\([^)]*\)).*/process \1 (\2)/p' "$err" | head -1)"
+        log_info "apt is locked${holder:+ by $holder}. Waiting for it to finish..."
+      fi
+      rm -f "$err"
+      sleep 5
+      continue
+    fi
+    cat "$err" >&2
+    rm -f "$err"
+    return "$rc"
+  done
+}
+
 # Run apt-get update, hiding the noisy duplicate-source warnings the Azure ML
 # image ships with (real errors still print).
 apt_update_quiet() {
-  sudo apt-get update -qq 2> >(grep -Ev '^W: ' >&2 || true)
+  apt_get update -qq
 }
 
 # ---------------------------------------------------------------------------
