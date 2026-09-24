@@ -11,7 +11,7 @@ This is **arrive-aml**: an Azure ML compute instance setup automation system. On
 Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) via SMB/CIFS, making git operations 10-100x slower than local disk. This repository implements a **two-location architecture**:
 
 ```
-~/cloudfiles/code/Users/rarko/main/REPO/  ← Source of Truth (SOT)
+~/cloudfiles/code/Users/<you>/main/REPO/  ← Source of Truth (SOT)
                                           - Network mount (slow: 7-30s git status)
                                           - Persistent; the SAME share is mounted on every
                                             compute instance the user owns
@@ -27,7 +27,7 @@ Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) via SMB/CIFS,
                                           - /mnt is Azure's EPHEMERAL resource disk: wiped on stop/start
 ```
 
-**Key insight**: the mirror is plain git - a local clone with two remotes. Every commit is pushed to the SOT's `.git` by a hook within seconds, so the persistent copy is always current, and `git push` goes to GitHub as usual. Measured on rarko1: `git status` 5.4 s in the SOT, 3.0 s in a linked worktree (its index/HEAD/refs still live on the share, 60-95 ms per file op), 0.005 s in the clone. That is why linked worktrees were dropped; `mirror.sh` migrates legacy worktree mirrors automatically and removes their registrations from the SOT.
+**Key insight**: the mirror is plain git - a local clone with two remotes. Every commit is pushed to the SOT's `.git` by a hook within seconds, so the persistent copy is always current, and `git push` goes to GitHub as usual. Measured on a compute instance: `git status` 5.4 s in the SOT, 3.0 s in a linked worktree (its index/HEAD/refs still live on the share, 60-95 ms per file op), 0.005 s in the clone. That is why linked worktrees were dropped; `mirror.sh` migrates legacy worktree mirrors automatically and removes their registrations from the SOT.
 
 `/mnt` wipes are expected: the next interactive login runs `aml-bootstrap --restore`, which re-clones (GitHub first, SOT fallback), fetches the branches only the SOT has, and rebuilds venvs. Only uncommitted edits (and commits whose background push failed - `verify-setup.sh` reports those) can be lost.
 
@@ -35,15 +35,19 @@ Azure ML uses network-mounted storage (`~/cloudfiles/code/Users/`) via SMB/CIFS,
 
 ```
 scripts/
-├── bootstrap.sh             # THE entry point: tools → shell → repos/mirrors/venvs → skills → verify
+├── get-started.sh           # First run on an empty share: clone arrive-aml into <you>/main, exec bootstrap
+├── bootstrap.sh             # THE entry point: you → tools → shell → repos/mirrors/venvs → skills → verify
+│                            #   --configure = change your answers; --yes = never prompt
 │                            #   --restore = after a VM stop/start (skips tools)
 ├── setup-vm.sh              # Tools orchestrator (--all); --no-verify when called from bootstrap
-├── setup-repos.sh           # repos.conf → SOT clone + mirror worktree + uv venv per repo
+├── setup-repos.sh           # repos.conf (+ personal list) → SOT clone + mirror clone + uv venv; --add owner/repo
 ├── verify-setup.sh          # Required vs optional checks; prints the fix for each failure
 ├── bootstrap-azureml.sh     # Python venv for this repo only (thin wrapper)
 ├── setup-azureml-ssh.sh     # Laptop SSH config for Remote-SSH (run on the laptop)
 └── lib/                     # Modular pieces (all idempotent)
-    ├── common.sh            # Logging, detect_sot_base, this_host, github_ssh_ok, ensure_local_dir, trim
+    ├── common.sh            # Logging, team defaults, config_set, ask/can_prompt, apply_git_identity,
+    │                        #   detect_sot_base, aml_user, repo_url, read_repo_entries, github_ssh_ok
+    ├── configure-user.sh    # Wizard: detect/ask name, email, GitHub; saves env + share profile
     ├── mirror.sh            # ensure_mirror_worktree (local clone + sot remote + sync hooks; source only)
     ├── configure-git.sh     # Network-optimized git settings + safe.directory * + push.autoSetupRemote
     ├── configure-github-ssh.sh  # Key, ~/.ssh/config, known_hosts, gh upload, port-443 fallback
@@ -73,25 +77,29 @@ docs/
 `repos.conf` defines which repositories to clone and mirror:
 
 ```
-REPO_URL|REPO_NAME|AUTO_MIRROR
-git@github.com:rarko-arrive/arrive-aml.git|arrive-aml|yes
+REPO|NAME|AUTO_MIRROR
+{org}/arrive-aml|arrive-aml|yes
 ```
 
-`scripts/setup-repos.sh` parses this file and, per repo:
-1. Clones it to the SOT base (derived from where this arrive-aml checkout's `.git` lives: `~/cloudfiles/code/Users/<aml-user>/main`; override with `ARRIVE_SOT_BASE`)
+`{org}` expands to `ARRIVE_GITHUB_ORG` (team default `ARRIVE_DEFAULT_GITHUB_ORG` in `common.sh`, the one place to change on an org move - see docs/ORG-MOVE.md). REPO may also be `owner/name` or a full git URL; `repo_url` picks ssh or https (`ARRIVE_GIT_PROTOCOL=auto|ssh|https`). Personal repos go in `~/.config/arrive-aml/repos.conf` (same format; `setup-repos.sh --add owner/name` appends there). `read_repo_entries` merges both lists (team first, duplicates by name skipped); every consumer (setup-repos, verify-setup, login-restore) uses the merged list.
+
+`scripts/setup-repos.sh` processes the merged list and, per repo:
+1. Clones it to the SOT base (`~/cloudfiles/code/Users/<aml-user>/main`; `detect_sot_base` tries `ARRIVE_SOT_BASE`, then this checkout's own path, then the mirror's `sot` remote, then a folder matching the instance name)
 2. Creates or repairs the mirror clone at `/mnt/mirror/REPO_NAME/` (if AUTO_MIRROR=yes)
 3. Runs `uv sync` into `/mnt/uv-venvs/REPO_NAME` and symlinks `.venv` in the mirror (if `pyproject.toml` exists)
 
 Default repos: arrive-aml (this repo), azureml-skills (Claude Code skills), arrive-ds (data science utilities)
 
-`skills.conf` (`REPO_URL|NAME`) lists Claude Code skill repos; `scripts/lib/install-claude-skills.sh` clones them to `~/.claude/plugins/marketplaces/<NAME>` and symlinks `skills/*` into `~/.claude/skills/`. azureml-skills is a plugin repo with a `skills/` folder, not a marketplace, so `/plugin install` does not apply.
+`skills.conf` (`REPO|NAME`, plus personal `~/.config/arrive-aml/skills.conf`) lists Claude Code skill repos; `scripts/lib/install-claude-skills.sh` clones them to `~/.claude/plugins/marketplaces/<NAME>` and symlinks `skills/*` into `~/.claude/skills/`. azureml-skills is a plugin repo with a `skills/` folder, not a marketplace, so `/plugin install` does not apply.
 
 ## Common Development Tasks
 
 ### Initial Setup (Fresh VM)
 ```bash
-# Complete setup in one command (tools + shell + repos/mirrors/venvs + skills + verify)
-bash ~/cloudfiles/code/Users/rarko/main/arrive-aml/scripts/bootstrap.sh
+# New user, empty share: clone arrive-aml into ~/cloudfiles/code/Users/<you>/main and bootstrap
+curl -fsSL https://raw.githubusercontent.com/<team-org>/arrive-aml/main/scripts/get-started.sh | bash
+# arrive-aml already on your share (another VM): complete setup in one command
+bash ~/cloudfiles/code/Users/<you>/main/arrive-aml/scripts/bootstrap.sh
 source ~/.bashrc
 
 # After every VM stop/start (/mnt wiped): recreate mirrors + venvs
@@ -141,7 +149,7 @@ time git status  # Should be <1s in mirror, 7-30s in SOT
 - Disables automatic garbage collection
 - Enables manyFiles feature
 - Sets status.showUntrackedFiles=no (use -u to show)
-- Configures user (Rick Arko <rarko@arrivelogistics.com>)
+- Applies the user's identity from `~/.config/arrive-aml/env` (`apply_git_identity`); never a hard-coded default
 
 **Why this matters**: Without these settings, `git status` takes 10-30 seconds on Azure ML. With them: 7-8 seconds. With mirror worktree: <1 second.
 
@@ -151,7 +159,7 @@ All scripts in `scripts/lib/` are:
 - **Idempotent**: Safe to run multiple times
 - **Modular**: Can be run independently
 - **Verbose**: Use common.sh logging (log_info, log_success, log_error)
-- **Non-interactive by default**: Use flags like `--all` to skip prompts
+- **Non-interactive by default**: Use flags like `--all` to skip prompts. The only questions come from `configure-user.sh` (and gh's device login); they use `ask`/`can_prompt` from common.sh, read from `/dev/tty`, and never run when `ARRIVE_NONINTERACTIVE=1` (`--yes`, `--restore`, root/startup script) or on login auto-restore
 - **Dry-run capable**: `--dry-run` shows what would happen
 
 ## Key Non-Obvious Patterns
@@ -174,14 +182,21 @@ All scripts in `scripts/lib/` are:
 
 9. **The cloudfiles mount is root-owned CIFS** - `configure-git.sh` sets `safe.directory *`; without it git refuses every repo on the mount. `chown` on the mount is a no-op.
 
+10. **Nothing user-specific in code** - identity, org and personal repos live in `~/.config/arrive-aml/env` (written with `config_set`, which merges; never overwrite the file) and `~/.config/arrive-aml/repos.conf`. The wizard also writes `<SOT base>/.arrive-aml/profile` so a user's next VM asks nothing; that share is writable by the whole workspace, so it is parsed as data (`profile_get`), never sourced. The org is only pinned in the env file when it differs from the team default, so changing `ARRIVE_DEFAULT_GITHUB_ORG` reaches everyone. `tests/lint.sh` fails on any personal name/folder/VM in code or docs.
+
+11. **`~/cloudfiles/code/Users/` lists every workspace user** - never pick "the only folder" there. `guess_aml_user` matches the instance name (`ctracy2` → `ctracy`) and the wizard/get-started confirm it.
+
+12. **Anything inside `while read ... done < <(list)` must not read stdin** - `ssh` (e.g. `github_ssh_ok`) and some tools swallow the rest of the list. Redirect `</dev/null` in the loop body.
+
 ## Testing Changes
 
 When modifying setup scripts:
-1. `bash -n` every script; test with `--dry-run` first: `bash scripts/bootstrap.sh --dry-run`
-2. Test individual pieces: `bash scripts/lib/install-docker.sh`, `bash scripts/setup-repos.sh --only arrive-ds`
-3. Verify with: `bash scripts/verify-setup.sh` (exit 1 only on required failures)
-4. Test the restart path: `bash scripts/bootstrap.sh --restore`
-5. Docs: README.md is the one-screen happy path; anything longer goes under `docs/` and is linked from the README table
+1. `bash tests/lint.sh` (bash -n, shellcheck errors, no user-specific values), then `bash scripts/bootstrap.sh --dry-run`
+2. `bash tests/sandbox-new-user.sh`: the whole new-user flow (get-started → wizard over a pty → bootstrap → mirrors → commit sync → /mnt wipe + restore → second VM → --add) for a simulated user in a throwaway HOME/share/fake GitHub; never touches your real setup
+3. Test individual pieces: `bash scripts/lib/install-docker.sh`, `bash scripts/setup-repos.sh --only arrive-ds`
+4. Verify with: `bash scripts/verify-setup.sh` (exit 1 only on required failures)
+5. Test the restart path: `bash scripts/bootstrap.sh --restore`
+6. Docs: README.md is the one-screen happy path; anything longer goes under `docs/` and is linked from the README table
 
 ## Integration Points
 
@@ -194,12 +209,16 @@ When modifying setup scripts:
 - If user reports slow git: Check they're working in `/mnt/mirror/`, not SOT
 - If Python packages install slowly: Ensure venv is at `/mnt/uv-venvs/`, not in repo or on cloudfiles
 - If mirror worktree missing after VM restart: `aml-bootstrap --restore`
+- If git commits have the wrong author or the wizard guessed the wrong folder: `aml-bootstrap --configure`
 - If setup fails: `bash scripts/verify-setup.sh` names the failing check and the fix; run that single script from `scripts/lib/`
 - Always work in mirrors, always commit and push regularly (mirror is local disk, wiped on stop/start)
 
 ## Documentation Hierarchy
 
 - **README.md**: one screen - the command, the restore, the daily loop, a table linking to docs/
+- **docs/GETTING-STARTED.md**: the friendly first-run walkthrough (what the wizard asks, what done looks like)
+- **docs/TESTING-NEW-USER.md**: how a change is tested as a brand-new user (sandbox + real-VM checklist)
+- **docs/ORG-MOVE.md**: checklist for moving the team repos to another GitHub org
 - **docs/WORKFLOW.md**: the canonical page every scientist repeats per PR (setup, restore, loop, self-checks, all fixes, why it is built this way)
 - **docs/FRESH-VM.md**: step-by-step for a new VM / new user, incl. the Azure ML startup-script option
 - **docs/MIRROR-PATTERN.md**: SOT + local clone architecture with the measurements behind it

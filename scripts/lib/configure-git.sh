@@ -80,15 +80,11 @@ configure_git_performance() {
   git config --global push.autoSetupRemote true
   git config --global init.defaultBranch main
 
-  # Configure user (if not already set)
-  if [ -z "$(git config --global user.name 2>/dev/null || true)" ]; then
-    log_info "Setting git user.name..."
-    git config --global user.name "Rick Arko"
-  fi
-
+  # Commit identity comes from the setup wizard (scripts/lib/configure-user.sh),
+  # never from a hard-coded default.
+  apply_git_identity
   if [ -z "$(git config --global user.email 2>/dev/null || true)" ]; then
-    log_info "Setting git user.email..."
-    git config --global user.email "rarko@arrivelogistics.com"
+    log_warn "git user.name/user.email not set yet - run: aml-bootstrap --configure"
   fi
 
   log_success "Git performance configuration complete!"

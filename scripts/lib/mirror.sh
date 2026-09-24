@@ -76,11 +76,9 @@ mirror_unsynced_count() {
   local mirror="$1" branch
   branch="$(git -C "$mirror" symbolic-ref -q --short HEAD 2>/dev/null || true)"
   [ -n "$branch" ] || { echo 0; return 0; }
-  if git -C "$mirror" show-ref -q --verify "refs/remotes/sot/$branch"; then
-    git -C "$mirror" rev-list --count "sot/$branch..HEAD" 2>/dev/null || echo 0
-  else
-    git -C "$mirror" rev-list --count HEAD 2>/dev/null || echo 0
-  fi
+  # Commits reachable from HEAD but from no SOT branch: a new branch with no
+  # commits of its own yet counts 0, not its whole history.
+  git -C "$mirror" rev-list --count HEAD --not --remotes=sot 2>/dev/null || echo 0
 }
 
 # Install the hooks that keep the SOT current after every commit/merge/rewrite.

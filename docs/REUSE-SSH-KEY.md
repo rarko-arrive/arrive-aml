@@ -13,13 +13,13 @@
 ssh-keygen -y -f ~/.ssh/your-key.pem > ~/.ssh/your-key.pub
 
 # Example with your key
-ssh-keygen -y -f ~/.ssh/rarko1.pem > ~/.ssh/rarko1.pub
+ssh-keygen -y -f ~/.ssh/my-aml-vm.pem > ~/.ssh/my-aml-vm.pub
 ```
 
 ### 2. View Your Public Key
 
 ```bash
-cat ~/.ssh/rarko1.pub
+cat ~/.ssh/my-aml-vm.pub
 # Copy this entire output (starts with ssh-rsa or ssh-ed25519)
 ```
 
@@ -43,7 +43,7 @@ cd ~/dev/arrive-aml  # or wherever you cloned it
 bash scripts/setup-azureml-ssh.sh
 
 # Enter:
-# - New VM hostname/alias (e.g., rarko2)
+# - New VM hostname/alias (e.g., my-aml-vm-2)
 # - New VM's public IP (from Azure portal)
 # - Same .pem file path (reused!)
 ```
@@ -59,15 +59,15 @@ bash scripts/setup-azureml-ssh.sh
 └── known_hosts              # Auto-populated
 
 # In SSH config:
-Host rarko1
+Host my-aml-vm
     HostName 1.2.3.4
     IdentityFile ~/.ssh/azure-ml-master.pem
 
-Host rarko2
+Host my-aml-vm-2
     HostName 5.6.7.8
     IdentityFile ~/.ssh/azure-ml-master.pem  # Same key!
 
-Host rarko3
+Host my-aml-vm-3
     HostName 9.10.11.12
     IdentityFile ~/.ssh/azure-ml-master.pem  # Same key!
 ```

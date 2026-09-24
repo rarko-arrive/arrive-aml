@@ -12,11 +12,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
 source "$SCRIPT_DIR/common.sh"
 
+# Log gh in when it is not yet (interactive runs only), let git use gh for HTTPS,
+# and remember the GitHub user name.
+ensure_gh_login() {
+  command -v gh >/dev/null 2>&1 || return 0
+  if ! gh auth status >/dev/null 2>&1; then
+    if ! can_prompt; then
+      return 0
+    fi
+    cat > /dev/tty <<'LOGIN'
+
+  GitHub login (once per VM)
+  gh prints a one-time code. Open https://github.com/login/device on your
+  laptop, paste the code and approve. This VM can then clone the team repos
+  and upload its SSH key for you. (No browser opens on the VM; that is fine.)
+
+LOGIN
+    if ! gh auth login --hostname github.com --git-protocol ssh --web --skip-ssh-key \
+        --scopes admin:public_key </dev/tty >/dev/tty 2>&1; then
+      log_warn "GitHub login did not finish. Retry later: gh auth login --web -s admin:public_key"
+      return 0
+    fi
+  fi
+  gh auth setup-git --hostname github.com >/dev/null 2>&1 || true
+  local login
+  login="$(gh api user -q .login 2>/dev/null || true)"
+  if [ -n "$login" ] && [ "$login" != "${ARRIVE_GITHUB_USER:-}" ]; then
+    config_set ARRIVE_GITHUB_USER "$login"
+  fi
+  [ -z "$login" ] || log_success "GitHub: logged in as @$login"
+}
+
 configure_github_ssh() {
   local SSH_DIR="${HOME}/.ssh"
   local KEY_FILE="${SSH_DIR}/id_ed25519_github"
   local CONFIG_FILE="${SSH_DIR}/config"
-  local EMAIL="${1:-$(git config --global user.email 2>/dev/null || echo "${USER}@arrivelogistics.com")}"
+  local EMAIL="${1:-${ARRIVE_USER_EMAIL:-$(git config --global user.email 2>/dev/null || true)}}"
+  [ -n "$EMAIL" ] || EMAIL="${USER}@$(this_host)"
 
   log_info "Configuring GitHub SSH authentication..."
 
@@ -58,6 +90,9 @@ configure_github_ssh() {
     log_warn "Could not fetch GitHub host keys (offline?). First connection will ask to confirm."
   fi
 
+  # --- log in to GitHub once (browser device code) -------------------------
+  ensure_gh_login
+
   # --- upload key with gh if needed ---------------------------------------
   local pub_material
   pub_material="$(awk '{print $2}' "${KEY_FILE}.pub")"
@@ -75,7 +110,7 @@ configure_github_ssh() {
     fi
   else
     log_warn "gh is not authenticated - key was not uploaded automatically."
-    log_info "Run: gh auth login   (choose SSH, and let it upload ${KEY_FILE}.pub)"
+    log_info "Run: gh auth login --web -s admin:public_key   (then: aml-bootstrap)"
   fi
 
   # --- test ----------------------------------------------------------------

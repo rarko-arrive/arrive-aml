@@ -55,7 +55,7 @@ mkdir -p "$USER_SSH_DIR" "$REPO_SSH_DIR"
 chmod 700 "$USER_SSH_DIR"
 
 # --- Collect values ---
-read -rp "SSH Host alias (short name in Cursor, e.g. rarko1): " HOST_ALIAS
+read -rp "SSH Host alias (short name in Cursor, e.g. my-aml-vm): " HOST_ALIAS
 HOST_ALIAS="${HOST_ALIAS// /}"
 if [ -z "$HOST_ALIAS" ]; then
   echo "Alias is required." >&2
@@ -85,7 +85,7 @@ if [ ! -f "$PEM_SRC" ]; then
   exit 1
 fi
 
-# Key filename is independent of the Host alias (e.g. alias rarko1, key rarko.pem).
+# Key filename is independent of the Host alias (e.g. alias my-aml-vm, key my-aml-vm.pem).
 PEM_DEFAULT="$(basename "$PEM_SRC")"
 read -rp "Install key as ~/.ssh/<name> [${PEM_DEFAULT}]: " PEM_NAME
 PEM_NAME="${PEM_NAME:-$PEM_DEFAULT}"
@@ -124,7 +124,7 @@ fi
 # --- Host block ---
 HOST_BLOCK=$(cat <<EOF
 
-# Azure ML compute ($HOST_ALIAS) — managed by ds-cursor-demo/scripts/setup-azureml-ssh.sh
+# Azure ML compute ($HOST_ALIAS) — managed by arrive-aml/scripts/setup-azureml-ssh.sh
 Host ${HOST_ALIAS}
     HostName ${HOST_IP}
     User ${HOST_USER}

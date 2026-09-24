@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Set up all configured repositories (idempotent)
-#   1. clone each repo from repos.conf into the SOT (~/cloudfiles/code/Users/<you>/main)
+#   1. clone each repo from repos.conf (+ ~/.config/arrive-aml/repos.conf) into the
+#      SOT (~/cloudfiles/code/Users/<you>/main)
 #   2. create/repair its fast local mirror clone on /mnt/mirror  (AUTO_MIRROR=yes)
 #   3. create/refresh its uv venv on local disk + .venv symlink in the mirror
 #
@@ -16,51 +17,51 @@ REPOS_CONF="${ARRIVE_ROOT}/repos.conf"
 SKIP_MIRRORS=false
 SKIP_VENVS=false
 ONLY_REPO=""
+ADD_REPO=""
 
 usage() {
   cat <<USAGE
 Usage: bash scripts/setup-repos.sh [OPTIONS]
 
-Clone repos from repos.conf into the SOT, create mirror worktrees and venvs.
+Clone repos into the SOT, create fast mirror clones and venvs.
 
 Options:
-  --list          List repositories in repos.conf
+  --list          List the configured repositories
   --only NAME     Only process this repository
-  --skip-mirrors  Clone only (no /mnt/mirror worktrees, no venvs)
+  --add REPO      Add a repo (owner/name or git URL) to your personal list
+                  (~/.config/arrive-aml/repos.conf) and set it up now
+  --skip-mirrors  Clone only (no /mnt/mirror clones, no venvs)
   --skip-venvs    Do not create Python venvs
   --help          Show this help
 
-Configuration: edit repos.conf (REPO_URL|REPO_NAME|AUTO_MIRROR)
+Configuration: team repos in repos.conf, yours in ${ARRIVE_EXTRA_REPOS_FILE}
+Format: REPO|NAME|AUTO_MIRROR   (REPO: {org}/name, owner/name or a git URL)
 USAGE
 }
 
 read_repos() {
-  # prints: url name auto_mirror (whitespace-trimmed), skipping comments/blank lines
-  local url name mirror
-  while IFS='|' read -r url name mirror || [ -n "${url:-}" ]; do
-    url="$(trim "${url:-}")"
-    [ -z "$url" ] && continue
-    [[ "$url" == \#* ]] && continue
-    name="$(trim "${name:-}")"
-    mirror="$(trim "${mirror:-yes}")"
-    [ -n "$name" ] || name="$(basename "$url" .git)"
-    echo "$url $name $mirror"
-  done < "$REPOS_CONF"
+  # prints: spec name auto_mirror, team repos first, then personal ones
+  local spec name mirror
+  while IFS='|' read -r spec name mirror; do
+    echo "$spec $name ${mirror:-yes}"
+  done < <(read_repo_entries)
 }
 
 list_repos() {
-  log_info "Configured repositories in repos.conf:"
+  _ARRIVE_PROTOCOL_CACHE="$(github_protocol)"
+  log_info "Configured repositories (org: $ARRIVE_GITHUB_ORG, protocol: $_ARRIVE_PROTOCOL_CACHE):"
   echo
-  printf "%-50s %-20s %-8s\n" "Repository" "Name" "Mirror"
-  printf "%-50s %-20s %-8s\n" "----------" "----" "------"
-  read_repos | while read -r url name mirror; do
-    printf "%-50s %-20s %-8s\n" "$url" "$name" "$mirror"
+  printf "%-55s %-20s %-8s\n" "Clone URL" "Name" "Mirror"
+  printf "%-55s %-20s %-8s\n" "---------" "----" "------"
+  read_repos | while read -r spec name mirror; do
+    printf "%-55s %-20s %-8s\n" "$(repo_url "$spec")" "$name" "$mirror"
   done
   echo
 }
 
 setup_one_repo() {
-  local url="$1" name="$2" auto_mirror="$3" sot_base="$4"
+  local url name="$2" auto_mirror="$3" sot_base="$4"
+  url="$(repo_url "$1")"
   local sot_path="${sot_base}/${name}"
   local mirror_path="${MIRROR_BASE}/${name}"
 
@@ -76,7 +77,8 @@ setup_one_repo() {
   else
     log_info "Cloning $url -> $sot_path (network mount, one-time cost)..."
     if ! git clone "$url" "$sot_path"; then
-      log_error "Clone failed for $name. Check GitHub SSH: bash scripts/lib/configure-github-ssh.sh"
+      log_error "Clone failed for $name ($url)."
+      log_info "  No access? Ask for it on GitHub. Auth problem? bash scripts/lib/configure-github-ssh.sh"
       return 1
     fi
     log_success "Cloned $name"
@@ -89,7 +91,7 @@ setup_one_repo() {
   ensure_mirror_worktree "$sot_path" "$mirror_path" || return 1
 
   # 3. venv (only for Python projects)
-  if [ "$SKIP_VENVS" = false ] && [ -f "$mirror_path/pyproject.toml" ]; then
+  if [ "$SKIP_VENVS" = false ] && [ -n "$(repo_python_kind "$mirror_path")" ]; then
     bash "$SCRIPT_DIR/lib/setup-python-venv.sh" "$mirror_path" || {
       log_warn "venv setup failed for $name (continuing)"
       return 1
@@ -110,9 +112,15 @@ setup_repos() {
     log_error "repos.conf not found at: $REPOS_CONF"
     exit 1
   fi
+  if [ -n "$ONLY_REPO" ] && ! read_repos | awk '{print $2}' | grep -qx "$ONLY_REPO"; then
+    log_error "'$ONLY_REPO' is not in repos.conf or ${ARRIVE_EXTRA_REPOS_FILE}"
+    log_info "Add it: bash scripts/setup-repos.sh --add owner/$ONLY_REPO"
+    exit 1
+  fi
 
+  _ARRIVE_PROTOCOL_CACHE="$(github_protocol)"
   print_separator
-  log_info "Setting up repositories"
+  log_info "Setting up repositories (org: $ARRIVE_GITHUB_ORG, clone over $_ARRIVE_PROTOCOL_CACHE)"
   log_info "  SOT base : $sot_base"
   log_info "  Mirrors  : $MIRROR_BASE   (host: $(this_host))"
   log_info "  venvs    : $UV_VENV_ROOT"
@@ -122,11 +130,11 @@ setup_repos() {
   cd "$HOME"   # a mirror may be replaced below; never keep it as cwd
 
   local ok=0 failed=0 failed_names=()
-  while read -r url name mirror; do
+  while read -r spec name mirror; do
     if [ -n "$ONLY_REPO" ] && [ "$ONLY_REPO" != "$name" ]; then
       continue
     fi
-    if setup_one_repo "$url" "$name" "$mirror" "$sot_base"; then
+    if setup_one_repo "$spec" "$name" "$mirror" "$sot_base" </dev/null; then
       ok=$((ok + 1))
     else
       failed=$((failed + 1))
@@ -153,6 +161,21 @@ setup_repos() {
   [ "$failed" -eq 0 ]
 }
 
+# Append a repo to the personal list (idempotent) and select it for this run
+add_repo() {
+  local spec="$1" name
+  name="$(repo_name_from_spec "$spec")"
+  if read_repos | awk '{print $2}' | grep -qx "$name"; then
+    log_info "$name is already configured"
+  else
+    mkdir -p "$(dirname "$ARRIVE_EXTRA_REPOS_FILE")"
+    [ -f "$ARRIVE_EXTRA_REPOS_FILE" ] || printf '# Your personal repos (format: REPO|NAME|AUTO_MIRROR, see repos.conf)\n' > "$ARRIVE_EXTRA_REPOS_FILE"
+    printf '%s|%s|yes\n' "$spec" "$name" >> "$ARRIVE_EXTRA_REPOS_FILE"
+    log_success "Added $spec to $ARRIVE_EXTRA_REPOS_FILE"
+  fi
+  ONLY_REPO="$name"
+}
+
 main() {
   check_not_root
   while [ $# -gt 0 ]; do
@@ -160,12 +183,14 @@ main() {
       --help|-h) usage; exit 0 ;;
       --list) list_repos; exit 0 ;;
       --only) ONLY_REPO="${2:-}"; shift ;;
+      --add) ADD_REPO="${2:-}"; [ -n "$ADD_REPO" ] || { usage; exit 1; }; shift ;;
       --skip-mirrors) SKIP_MIRRORS=true ;;
       --skip-venvs) SKIP_VENVS=true ;;
       *) log_error "Unknown option: $1"; usage; exit 1 ;;
     esac
     shift
   done
+  [ -z "$ADD_REPO" ] || add_repo "$ADD_REPO"
   setup_repos
 }
 

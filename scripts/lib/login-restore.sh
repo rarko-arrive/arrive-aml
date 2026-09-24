@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced from the managed ~/.bashrc block on interactive shells.
 # Bring /mnt mirrors and venvs back after a VM restart, without a manual command.
 #
@@ -11,7 +12,8 @@ _arrive_trim() {
   printf '%s' "$v"
 }
 
-# True when every AUTO_MIRROR=yes repo from repos.conf has a local clone.
+# True when every AUTO_MIRROR=yes repo (team repos.conf + your personal
+# ~/.config/arrive-aml/repos.conf) has a local clone.
 # A .git file (legacy linked worktree) does not count: restore replaces it.
 arrive_mirrors_ready() {
   local base="${MIRROR_BASE:-/mnt/mirror}"
@@ -25,20 +27,26 @@ arrive_mirrors_ready() {
   fi
   [ -d "$base" ] || return 1
 
-  local url name mirror any=0
-  while IFS='|' read -r url name mirror || [ -n "${url:-}" ]; do
-    url="$(_arrive_trim "${url:-}")"
-    [ -z "$url" ] && continue
-    case "$url" in
-      \#*) continue ;;
-    esac
-    name="$(_arrive_trim "${name:-}")"
-    mirror="$(_arrive_trim "${mirror:-yes}")"
-    [ -n "$name" ] || name="$(basename "$url" .git)"
-    [ "$mirror" = "yes" ] || continue
-    any=1
-    [ -d "$base/$name/.git" ] || return 1
-  done < "$conf"
+  local extra="${ARRIVE_EXTRA_REPOS_FILE:-${ARRIVE_CONFIG_DIR:-$HOME/.config/arrive-aml}/repos.conf}"
+  local f url name mirror any=0
+  for f in "$conf" "$extra"; do
+    [ -f "$f" ] || continue
+    while IFS='|' read -r url name mirror || [ -n "${url:-}" ]; do
+      url="$(_arrive_trim "${url:-}")"
+      [ -z "$url" ] && continue
+      case "$url" in
+        \#*) continue ;;
+      esac
+      name="$(_arrive_trim "${name:-}")"
+      mirror="$(_arrive_trim "${mirror:-}")"
+      if [ -z "$name" ]; then
+        name="${url%/}"; name="${name##*/}"; name="${name##*:}"; name="${name%.git}"
+      fi
+      [ "${mirror:-yes}" = "yes" ] || continue
+      any=1
+      [ -d "$base/$name/.git" ] || return 1
+    done < "$f"
+  done
   [ "$any" -eq 1 ]
 }
 

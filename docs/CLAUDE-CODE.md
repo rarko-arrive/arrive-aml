@@ -14,7 +14,10 @@ claude auth login                           # once per VM (or: claude setup-toke
 
 ## How skills are installed
 
-`skills.conf` lists skill repositories (`REPO_URL|NAME`). For each one the installer:
+`skills.conf` lists the team's skill repositories (`REPO|NAME`, where REPO is `{org}/name`,
+`owner/name` or a full git URL, as in [REPOS-CONFIG.md](REPOS-CONFIG.md); `{org}` expands to
+`ARRIVE_GITHUB_ORG`). Your personal skills repos go in `~/.config/arrive-aml/skills.conf` (same
+format, not committed). For each one the installer:
 
 1. clones it to `~/.claude/plugins/marketplaces/<NAME>` (OS disk, persists) or `git pull --ff-only`s it
 2. symlinks every `skills/<skill>/` that has a `SKILL.md` into `~/.claude/skills/<skill>`
@@ -56,16 +59,17 @@ uses the `claude` binary on the VM, so the VM-side install and login above are w
 
 ## Adding another skills repo
 
-Append to `skills.conf`:
+For the whole team, append to `skills.conf` (and open a PR):
 
 ```
-git@github.com:rarko-arrive/another-skills.git|another-skills
+{org}/another-skills|another-skills
 ```
 
-and run `bash scripts/lib/install-claude-skills.sh`.
+Just for you, append the same kind of line (e.g. `owner/my-skills|my-skills`) to
+`~/.config/arrive-aml/skills.conf`. Then run `bash scripts/lib/install-claude-skills.sh`.
 
 ## Resources
 
-- Skills library: https://github.com/rarko-arrive/azureml-skills
+- Skills library: https://github.com/<team-org>/azureml-skills
 - Worktree pattern: [docs/MIRROR-PATTERN.md](MIRROR-PATTERN.md)
 - Setup: [README.md](../README.md), [FRESH-VM.md](FRESH-VM.md)

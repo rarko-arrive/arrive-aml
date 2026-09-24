@@ -24,6 +24,21 @@ ARRIVE_STATE_DIR="${HOME}/.local/state/arrive-aml"
 # Where Claude Code skills repos are cloned (OS disk - persists)
 : "${CLAUDE_SKILLS_CLONE_DIR:=${HOME}/.claude/plugins/marketplaces}"
 
+# Team defaults. {org} in repos.conf / skills.conf expands to ARRIVE_GITHUB_ORG.
+# This is the ONE place to change when the team repos move to another GitHub org.
+ARRIVE_DEFAULT_GITHUB_ORG="rarko-arrive"
+: "${ARRIVE_GITHUB_ORG:=${ARRIVE_DEFAULT_GITHUB_ORG}}"
+: "${ARRIVE_EMAIL_DOMAIN:=arrivelogistics.com}"
+# Personal additions to repos.conf / skills.conf (same format, never committed)
+: "${ARRIVE_EXTRA_REPOS_FILE:=${ARRIVE_CONFIG_DIR}/repos.conf}"
+: "${ARRIVE_EXTRA_SKILLS_FILE:=${ARRIVE_CONFIG_DIR}/skills.conf}"
+# ssh | https | auto (auto = ssh when GitHub SSH works, else https)
+: "${ARRIVE_GIT_PROTOCOL:=auto}"
+# Who you are. Set by scripts/lib/configure-user.sh; deliberately no defaults.
+: "${ARRIVE_USER_NAME:=}"
+: "${ARRIVE_USER_EMAIL:=}"
+: "${ARRIVE_GITHUB_USER:=}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -141,6 +156,83 @@ print_separator() {
 }
 
 # ---------------------------------------------------------------------------
+# Config file (~/.config/arrive-aml/env), prompts, identity
+# ---------------------------------------------------------------------------
+
+# Set KEY="VALUE" in the env file (update in place or append) and in this shell.
+# Usage: config_set ARRIVE_USER_NAME "Colin Tracy"
+config_set() {
+  local key="$1" value="$2" escaped tmp
+  mkdir -p "$ARRIVE_CONFIG_DIR"
+  touch "$ARRIVE_ENV_FILE"
+  escaped="$(printf '%s' "$value" | sed -e 's/[\\"$`]/\\&/g')"
+  tmp="$(mktemp "${ARRIVE_ENV_FILE}.XXXXXX")"
+  awk -v k="$key" -v line="${key}=\"${escaped//\\/\\\\}\"" '
+    index($0, k"=") == 1 { if (!done) print line; done = 1; next }
+    { print }
+    END { if (!done) print line }
+  ' "$ARRIVE_ENV_FILE" > "$tmp"
+  mv "$tmp" "$ARRIVE_ENV_FILE"
+  printf -v "$key" '%s' "$value"
+}
+
+# Remove KEY from the env file (its default applies again)
+config_unset() {
+  local key="$1" tmp
+  [ -f "$ARRIVE_ENV_FILE" ] || return 0
+  tmp="$(mktemp "${ARRIVE_ENV_FILE}.XXXXXX")"
+  grep -v "^${key}=" "$ARRIVE_ENV_FILE" > "$tmp" || true
+  mv "$tmp" "$ARRIVE_ENV_FILE"
+}
+
+# True when we may ask questions: a terminal we can open, and nobody asked for a
+# non-interactive run (startup script, --yes, automatic restore on login).
+can_prompt() {
+  [ "${ARRIVE_NONINTERACTIVE:-}" = "1" ] && return 1
+  [ "${ARRIVE_AUTO_RESTORE:-}" = "1" ] && return 1
+  (exec 3</dev/tty) 2>/dev/null
+}
+
+# Ask on the terminal (works under `curl | bash` and with stdout tee'd to a log).
+# Usage: ask VAR "Your name" "default"
+# (Locals are __-prefixed so they never shadow the caller's VAR.)
+ask() {
+  local __var="$1" __question="$2" __default="${3:-}" __answer=""
+  if [ -n "$__default" ]; then
+    printf '  %s [%s]: ' "$__question" "$__default" > /dev/tty
+  else
+    printf '  %s: ' "$__question" > /dev/tty
+  fi
+  IFS= read -r __answer < /dev/tty || true
+  __answer="$(trim "$__answer")"
+  [ -n "$__answer" ] || __answer="$__default"
+  printf -v "$__var" '%s' "$__answer"
+}
+
+# Yes/no on the terminal, default yes. Usage: if ask_yes "Look right?"; then ...
+ask_yes() {
+  local reply=""
+  ask reply "$1 [Y/n]" ""
+  case "$reply" in
+    [nN]|[nN][oO]) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Write ARRIVE_USER_NAME / ARRIVE_USER_EMAIL into the global git config.
+# Never invents an identity: with nothing configured, git is left alone.
+apply_git_identity() {
+  if [ -n "${ARRIVE_USER_NAME:-}" ] && [ "$(git config --global user.name 2>/dev/null || true)" != "$ARRIVE_USER_NAME" ]; then
+    git config --global user.name "$ARRIVE_USER_NAME"
+    log_success "git user.name = $ARRIVE_USER_NAME"
+  fi
+  if [ -n "${ARRIVE_USER_EMAIL:-}" ] && [ "$(git config --global user.email 2>/dev/null || true)" != "$ARRIVE_USER_EMAIL" ]; then
+    git config --global user.email "$ARRIVE_USER_EMAIL"
+    log_success "git user.email = $ARRIVE_USER_EMAIL"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Azure ML environment helpers
 # ---------------------------------------------------------------------------
 
@@ -198,40 +290,69 @@ stable_cloudfiles_path() {
   echo "$p"
 }
 
+# Workspace folder that holds every user's files. NOTE: it lists ALL users of the
+# Azure ML workspace, not just you - never pick "the only folder" in it.
+: "${ARRIVE_USERS_DIR:=${HOME}/cloudfiles/code/Users}"
+
+# Best guess of your folder name under $ARRIVE_USERS_DIR from the compute
+# instance name (ctracy2 -> ctracy, ctracy-gpu -> ctracy). Prints nothing if no
+# folder matches. Callers confirm the guess with the user when they can.
+guess_aml_user() {
+  local host candidate
+  host="$(this_host)"
+  for candidate in "$host" "${host%%[0-9]*}" "${host%%[-_]*}" "${host%%[-_0-9]*}"; do
+    [ -n "$candidate" ] || continue
+    if [ -d "${ARRIVE_USERS_DIR}/${candidate}" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# The folder name under $ARRIVE_USERS_DIR this setup belongs to (e.g. ctracy).
+aml_user() {
+  local base
+  if base="$(detect_sot_base 2>/dev/null)"; then
+    case "$base" in
+      */code/Users/*/main) basename "$(dirname "$base")"; return 0 ;;
+    esac
+  fi
+  guess_aml_user
+}
+
 # Source-of-truth base directory: the directory that holds all SOT repos
-# (~/cloudfiles/code/Users/<aml-user>/main). Derived from where THIS arrive-aml
-# checkout's git database lives, so it works from the SOT and from a mirror.
-# Override with ARRIVE_SOT_BASE.
+# (~/cloudfiles/code/Users/<aml-user>/main). Tried in order:
+#   1. ARRIVE_SOT_BASE (env file / environment)
+#   2. this checkout lives in the SOT itself (.../code/Users/<you>/main/arrive-aml)
+#   3. this checkout is a mirror: its 'sot' remote points there
+#   4. the instance name matches a user folder that already has main/arrive-aml
 detect_sot_base() {
   if [ -n "${ARRIVE_SOT_BASE:-}" ]; then
     echo "$ARRIVE_SOT_BASE"
     return 0
   fi
 
-  local common sot_repo
-  common="$(git -C "$ARRIVE_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  if [ -n "$common" ]; then
-    sot_repo="$(dirname "$common")"
-    case "$sot_repo" in
-      */code/Users/*)
-        stable_cloudfiles_path "$(dirname "$sot_repo")"
-        return 0
-        ;;
-    esac
-  fi
-
-  # Fallback: a single user directory under cloudfiles that already has main/
-  local users_dir="${HOME}/cloudfiles/code/Users"
-  if [ -d "$users_dir" ]; then
-    local candidates=()
-    local d
-    for d in "$users_dir"/*/main; do
-      [ -d "$d/arrive-aml" ] && candidates+=("$d")
-    done
-    if [ "${#candidates[@]}" -eq 1 ]; then
-      echo "${candidates[0]}"
+  local root sot_url guess
+  root="$(stable_cloudfiles_path "$ARRIVE_ROOT")"
+  case "$root" in
+    */code/Users/*/main/*)
+      dirname "$root"
       return 0
-    fi
+      ;;
+  esac
+
+  sot_url="$(git -C "$ARRIVE_ROOT" config --get remote.sot.url 2>/dev/null || true)"
+  case "$sot_url" in
+    */code/Users/*/main/*)
+      stable_cloudfiles_path "$(dirname "$sot_url")"
+      return 0
+      ;;
+  esac
+
+  if guess="$(guess_aml_user)" && [ -d "${ARRIVE_USERS_DIR}/${guess}/main/arrive-aml" ]; then
+    echo "${ARRIVE_USERS_DIR}/${guess}/main"
+    return 0
   fi
 
   return 1
@@ -334,6 +455,106 @@ ensure_github_known_hosts() {
 # Sets GITHUB_SSH_OUTPUT for callers that want to show the reason on failure.
 github_ssh_ok() {
   GITHUB_SSH_OUTPUT="$(ssh -T -o BatchMode=yes -o ConnectTimeout=15 \
-    -o StrictHostKeyChecking=accept-new git@github.com 2>&1 || true)"
+    -o StrictHostKeyChecking=accept-new git@github.com </dev/null 2>&1 || true)"
   [[ "$GITHUB_SSH_OUTPUT" == *"successfully authenticated"* ]]
+}
+
+# ssh or https for new GitHub clones. ARRIVE_GIT_PROTOCOL=auto picks ssh when
+# GitHub SSH already works, else https (gh's credential helper then handles it).
+# The answer is cached for the rest of the run.
+github_protocol() {
+  case "${ARRIVE_GIT_PROTOCOL:-auto}" in
+    ssh|https) echo "$ARRIVE_GIT_PROTOCOL"; return 0 ;;
+  esac
+  if [ -z "${_ARRIVE_PROTOCOL_CACHE:-}" ]; then
+    if [ -f "${HOME}/.ssh/id_ed25519_github" ] && github_ssh_ok; then
+      _ARRIVE_PROTOCOL_CACHE=ssh
+    else
+      _ARRIVE_PROTOCOL_CACHE=https
+    fi
+  fi
+  echo "$_ARRIVE_PROTOCOL_CACHE"
+}
+
+# Turn a repos.conf / skills.conf entry into a clone URL.
+#   {org}/arrive-ds            -> ${ARRIVE_GITHUB_ORG}/arrive-ds (below)
+#   owner/name                 -> git@github.com:owner/name.git or https://github.com/owner/name.git
+#   git@github.com:owner/name  -> kept, or rewritten to https when SSH is unavailable
+#   anything else (file path, other host) -> unchanged
+repo_url() {
+  local spec="$1" path=""
+  spec="${spec//\{org\}/${ARRIVE_GITHUB_ORG}}"
+  case "$spec" in
+    git@github.com:*) path="${spec#git@github.com:}" ;;
+    ssh://git@github.com/*) path="${spec#ssh://git@github.com/}" ;;
+    https://github.com/*) path="${spec#https://github.com/}" ;;
+    */*)
+      if [[ "$spec" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+        path="$spec"
+      fi
+      ;;
+  esac
+  if [ -z "$path" ]; then
+    echo "$spec"
+    return 0
+  fi
+  path="${path%.git}"
+  if [ "$(github_protocol)" = ssh ]; then
+    echo "git@github.com:${path}.git"
+  else
+    echo "https://github.com/${path}.git"
+  fi
+}
+
+# Directory name for an entry without an explicit NAME column
+repo_name_from_spec() {
+  local spec="${1%/}"
+  spec="${spec##*/}"
+  spec="${spec##*:}"
+  echo "${spec%.git}"
+}
+
+# Print the entries of one or more pipe-separated conf files as
+#   SPEC|NAME|FLAG
+# skipping comments, blank lines and names already seen (first file wins).
+# Missing files are ignored. Usage: read_conf_entries repos.conf ~/.config/arrive-aml/repos.conf
+read_conf_entries() {
+  local f spec name flag seen=" "
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    while IFS='|' read -r spec name flag || [ -n "${spec:-}" ]; do
+      spec="$(trim "${spec:-}")"
+      [ -z "$spec" ] && continue
+      [[ "$spec" == \#* ]] && continue
+      name="$(trim "${name:-}")"
+      flag="$(trim "${flag:-}")"
+      [ -n "$name" ] || name="$(repo_name_from_spec "$spec")"
+      case "$seen" in *" $name "*) continue ;; esac
+      seen="${seen}${name} "
+      printf '%s|%s|%s\n' "$spec" "$name" "$flag"
+    done < "$f"
+  done
+}
+
+# How a repo declares its Python environment:
+#   project       pyproject.toml with a [project] table -> uv sync
+#   requirements  requirements.txt (pyproject may hold only tool config) -> uv venv + uv pip install -r
+#   (nothing)     not a Python project -> no venv
+repo_python_kind() {
+  local dir="$1"
+  if [ -f "$dir/pyproject.toml" ] && grep -q '^\[project\]' "$dir/pyproject.toml"; then
+    echo project
+  elif [ -f "$dir/requirements.txt" ]; then
+    echo requirements
+  fi
+}
+
+# Team repos plus your personal additions
+read_repo_entries() {
+  read_conf_entries "${ARRIVE_ROOT}/repos.conf" "$ARRIVE_EXTRA_REPOS_FILE"
+}
+
+# Team skills repos plus your personal additions
+read_skill_entries() {
+  read_conf_entries "${ARRIVE_ROOT}/skills.conf" "$ARRIVE_EXTRA_SKILLS_FILE"
 }

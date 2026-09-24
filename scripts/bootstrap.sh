@@ -7,6 +7,7 @@ set -euo pipefail
 #   bash ~/cloudfiles/code/Users/<you>/main/arrive-aml/scripts/bootstrap.sh
 #
 # What it does
+#   0. you       who you are (name, email, GitHub) - asks only what it cannot detect
 #   1. tools     scripts/setup-vm.sh --all   (git tuning, uv, gh, GitHub SSH, Docker, cloudflared, Claude Code)
 #   2. shell     ~/.bashrc block, ~/.config/arrive-aml/env, `aml-bootstrap` command
 #   3. repos     clone repos.conf into the SOT, local mirror clones on /mnt/mirror (auto-synced to SOT), uv venvs
@@ -31,14 +32,21 @@ DO_VENVS=true
 DO_SKILLS=true
 DO_VERIFY=true
 DRY_RUN=false
+RECONFIGURE=false
+USER_ARGS=()
 
 usage() {
   cat <<USAGE
 Usage: bash scripts/bootstrap.sh [OPTIONS]
 
-  (no options)     Full setup: tools + shell + repos/mirrors/venvs + skills + verify
+  (no options)     Full setup: you + tools + shell + repos/mirrors/venvs + skills + verify
   --restore        Recreate /mnt mirrors + venvs, refresh skills, verify
                    (an interactive login runs this when /mnt was wiped)
+  --configure      Review/change your name, email, team org and extra repos
+  --name "NAME"    Your full name for git commits (skips that question)
+  --email EMAIL    Your work email (skips that question)
+  --github-org ORG Team GitHub org for {org} in repos.conf (default: ${ARRIVE_DEFAULT_GITHUB_ORG})
+  --yes, -y        Never ask questions (use what is saved or detected)
   --skip-tools     Do not run setup-vm.sh --all
   --skip-repos     Do not clone repos / create mirrors / venvs
   --skip-venvs     Create mirrors but no Python venvs
@@ -58,6 +66,11 @@ parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --restore) RESTORE=true; DO_TOOLS=false ;;
+      --configure|--reconfigure) RECONFIGURE=true ;;
+      --name|--email|--github-org)
+        [ $# -ge 2 ] || { log_error "$1 needs a value"; exit 1; }
+        USER_ARGS+=("$1" "$2"); shift ;;
+      --yes|-y) export ARRIVE_NONINTERACTIVE=1 ;;
       --skip-tools) DO_TOOLS=false ;;
       --skip-repos) DO_REPOS=false ;;
       --skip-venvs) DO_VENVS=false ;;
@@ -190,6 +203,16 @@ main() {
 
   local failures=()
 
+  # Restores (often automatic, on login) and startup scripts never ask questions.
+  if [ "$RESTORE" = true ] || [ "$EUID" -eq 0 ]; then
+    export ARRIVE_NONINTERACTIVE=1
+  fi
+  [ "$RECONFIGURE" = false ] || USER_ARGS+=(--reconfigure)
+  run_step "0/5 You" bash "$SCRIPT_DIR/lib/configure-user.sh" "${USER_ARGS[@]}" || failures+=("you")
+  # Pick up what the wizard saved (identity, org) for the steps below.
+  # shellcheck disable=SC1090
+  [ -f "$ARRIVE_ENV_FILE" ] && source "$ARRIVE_ENV_FILE"
+
   if [ "$DO_TOOLS" = true ]; then
     run_step "1/5 Tools (setup-vm.sh --all)" bash "$SCRIPT_DIR/setup-vm.sh" --all --no-verify || failures+=("tools")
   else
@@ -222,14 +245,20 @@ main() {
   if [ "$DRY_RUN" = true ]; then
     log_info "Dry run - nothing was changed."
   elif [ ${#failures[@]} -eq 0 ] && [ "$verify_rc" -eq 0 ]; then
-    log_success "Bootstrap complete. Your VM is ready."
+    log_success "Bootstrap complete. Your VM is ready${ARRIVE_USER_NAME:+, ${ARRIVE_USER_NAME%% *}}."
   else
     log_warn "Bootstrap finished with problems: ${failures[*]:-} $([ "$verify_rc" -ne 0 ] && echo '(verification failed - see fixes above)')"
   fi
   echo
   echo "  Work here (fast git):    cd ${MIRROR_BASE}/arrive-aml"
   echo "  Python env:              source .venv/bin/activate   (or: uv run ...)"
+  if command -v claude >/dev/null 2>&1 && ! claude auth status >/dev/null 2>&1; then
+    echo "  Claude Code (once/VM):   claude auth login"
+  fi
   echo "  Claude Code:             claude    then  /work-in-repo"
+  if [ -z "${ARRIVE_USER_EMAIL:-}" ]; then
+    echo "  Tell git who you are:    aml-bootstrap --configure"
+  fi
   echo "  After a VM restart:      login restores mirrors automatically"
   echo "  New shell settings:      source ~/.bashrc"
   print_separator
