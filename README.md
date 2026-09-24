@@ -18,12 +18,13 @@ every VM you own. (Other user or fresh share: [docs/FRESH-VM.md](docs/FRESH-VM.m
 
 ## After every VM stop/start
 
-```bash
-aml-bootstrap --restore  # /mnt is wiped on restart; this brings mirrors + venvs back (~1-2 min)
-```
+`/mnt` comes back empty. The next SSH session restores mirrors and venvs on its own (~1-2 min)
+and then prints `✓ Ready`. Nothing committed is ever lost: every commit in a mirror is pushed
+to the persistent copy by a hook within seconds.
 
-Your shell reminds you when this is needed. Nothing committed is ever lost: every commit in a
-mirror is pushed to the persistent copy by a hook within seconds.
+```bash
+aml-bootstrap --restore  # same restore, if you want it done before you connect or a login restore failed
+```
 
 ## Work
 
@@ -51,7 +52,7 @@ GitHub  ←─ git push ─  /mnt/mirror/REPO  ─ hook: git push sot ─→  ~/
 | | Mirror `/mnt/mirror/REPO` | Source of truth `~/cloudfiles/.../main/REPO` |
 |---|---|---|
 | `git status` | 5 ms | 5 s |
-| Survives restart | no (`aml-bootstrap --restore`) | yes |
+| Survives restart | no (next login restores it) | yes |
 | You | edit, run, commit, push | never edit; it is a remote named `sot` |
 
 ## Docs

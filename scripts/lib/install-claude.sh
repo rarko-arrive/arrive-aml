@@ -24,7 +24,11 @@ install_claude() {
   export PATH="${HOME}/.local/bin:${PATH}"
 
   if command -v claude >/dev/null 2>&1; then
-    log_success "Claude Code already installed: $(claude --version 2>/dev/null || echo installed)"
+    log_info "Claude Code already installed: $(claude --version 2>/dev/null || echo installed). Checking for updates..."
+    # Keep it current: a new model (e.g. a new Opus) can require a newer CLI,
+    # and a long-lived VM otherwise never re-checks after the first install.
+    claude update >/dev/null 2>&1 || log_warn "Could not check for Claude Code updates (offline?)"
+    log_success "Claude Code: $(claude --version 2>/dev/null || echo installed)"
     claude_auth_hint
     return 0
   fi

@@ -23,7 +23,7 @@ install_docker() {
 
     log_info "Installing Docker prerequisites..."
     apt_update_quiet
-    sudo apt-get install -y -qq \
+    apt_get install -y -qq \
       ca-certificates \
       curl \
       gnupg \
@@ -42,7 +42,7 @@ install_docker() {
 
     log_info "Installing Docker Engine..."
     apt_update_quiet
-    sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    apt_get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
     log_success "Docker Engine installed!"
   fi

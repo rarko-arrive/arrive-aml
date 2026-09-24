@@ -13,13 +13,16 @@ set -euo pipefail
 #   4. skills    team Claude Code skills from skills.conf -> ~/.claude/skills
 #   5. verify    scripts/verify-setup.sh
 #
-# After every VM stop/start (/mnt is wiped):   aml-bootstrap --restore
+# After every VM stop/start (/mnt is wiped): an interactive login runs
+# `aml-bootstrap --restore` for you. Run it yourself to repair or refresh.
 # As an Azure ML *startup script* (runs as root): this script re-executes itself
 # as the login user, and waits for the cloudfiles mount.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
 source "$SCRIPT_DIR/lib/common.sh"
+# shellcheck source=scripts/lib/login-restore.sh
+ARRIVE_LOGIN_RESTORE_LIBRARY=1 source "$SCRIPT_DIR/lib/login-restore.sh"
 
 RESTORE=false
 DO_TOOLS=true
@@ -34,7 +37,8 @@ usage() {
 Usage: bash scripts/bootstrap.sh [OPTIONS]
 
   (no options)     Full setup: tools + shell + repos/mirrors/venvs + skills + verify
-  --restore        After a VM restart: recreate /mnt mirrors + venvs, refresh skills, verify
+  --restore        Recreate /mnt mirrors + venvs, refresh skills, verify
+                   (an interactive login runs this when /mnt was wiped)
   --skip-tools     Do not run setup-vm.sh --all
   --skip-repos     Do not clone repos / create mirrors / venvs
   --skip-venvs     Create mirrors but no Python venvs
@@ -85,6 +89,34 @@ reexec_as_login_user() {
   exec sudo -u "$target" -H bash "$SCRIPT_DIR/bootstrap.sh" "$@"
 }
 
+# Fast-forward this checkout from origin when it is clean, then re-exec so the
+# rest of the run uses the scripts that were just pulled. A dirty tree is left
+# alone. Failure (offline, diverged) continues with the scripts already here.
+maybe_update_self() {
+  [ "$DRY_RUN" = true ] && return 0
+  [ "${ARRIVE_NO_SELF_UPDATE:-}" = "1" ] && return 0
+  local repo before after
+  repo="$(cd "$SCRIPT_DIR/.." && pwd)"
+  git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  git -C "$repo" remote get-url origin >/dev/null 2>&1 || return 0
+  before="$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)"
+  [ -n "$before" ] || return 0
+  if ! git -C "$repo" diff --quiet --ignore-submodules 2>/dev/null \
+    || ! git -C "$repo" diff --cached --quiet --ignore-submodules 2>/dev/null; then
+    return 0
+  fi
+  if command -v timeout >/dev/null 2>&1; then
+    GIT_TERMINAL_PROMPT=0 timeout 90 git -C "$repo" pull --ff-only --quiet >/dev/null 2>&1 || return 0
+  else
+    GIT_TERMINAL_PROMPT=0 git -C "$repo" pull --ff-only --quiet >/dev/null 2>&1 || return 0
+  fi
+  after="$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)"
+  if [ -n "$after" ] && [ "$before" != "$after" ]; then
+    echo "arrive-aml updated (${before:0:7} -> ${after:0:7}); continuing with the new scripts"
+    exec bash "$repo/scripts/bootstrap.sh" "$@"
+  fi
+}
+
 run_step() {
   local title="$1"; shift
   echo
@@ -102,11 +134,27 @@ main() {
   reexec_as_login_user "$@"
   parse_args "$@"
   export PATH="${HOME}/.local/bin:${PATH}"
+  export ARRIVE_BOOTSTRAP_RUNNING=1
   # Never run from inside a mirror: --restore may replace that very directory,
   # and git cannot run at all once the cwd has been deleted.
   cd "$HOME"
 
   mkdir -p "$ARRIVE_STATE_DIR"
+  # One restore at a time. A second login waits, then exits immediately when
+  # this one already brought the mirrors back.
+  exec 9>"${ARRIVE_STATE_DIR}/bootstrap.lock"
+  if ! flock -n 9; then
+    if [ "${ARRIVE_AUTO_RESTORE:-}" != "1" ]; then
+      log_info "Another bootstrap is running; waiting..."
+    fi
+    flock -w 1800 9 || { log_error "Timed out waiting for the other bootstrap"; exit 1; }
+  fi
+  if [ "$RESTORE" = true ] && [ "${ARRIVE_AUTO_RESTORE:-}" = "1" ] && arrive_mirrors_ready; then
+    exit 0
+  fi
+
+  maybe_update_self "$@"
+
   local log="${ARRIVE_STATE_DIR}/bootstrap-$(date +%Y%m%d-%H%M%S).log"
   exec > >(tee -a "$log") 2>&1
 
@@ -182,7 +230,7 @@ main() {
   echo "  Work here (fast git):    cd ${MIRROR_BASE}/arrive-aml"
   echo "  Python env:              source .venv/bin/activate   (or: uv run ...)"
   echo "  Claude Code:             claude    then  /work-in-repo"
-  echo "  After a VM restart:      aml-bootstrap --restore"
+  echo "  After a VM restart:      login restores mirrors automatically"
   echo "  New shell settings:      source ~/.bashrc"
   print_separator
   [ ${#failures[@]} -eq 0 ] && [ "$verify_rc" -eq 0 ]

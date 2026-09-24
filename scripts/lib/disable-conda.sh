@@ -8,38 +8,51 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/common.sh
 source "$SCRIPT_DIR/common.sh"
 
-disable_conda() {
-  log_info "Disabling conda auto-activation..."
+# Azure's image leaves `conda activate azureml_py38` AFTER the init block.
+# Commenting out only the init block removes conda from PATH, so the next
+# login runs a command that does not exist. Scrub bashrc even when `conda`
+# itself is not currently on PATH (that is the broken state we are fixing).
+quiet_conda_bashrc() {
+  local rc="${HOME}/.bashrc"
+  [ -f "$rc" ] || return 0
 
-  # Check if conda is installed
-  if ! command -v conda >/dev/null 2>&1; then
-    log_warn "conda not found - nothing to disable"
+  if ! grep -q "conda initialize" "$rc" && ! grep -qE '^[[:space:]]*conda[[:space:]]' "$rc"; then
+    log_info "No conda auto-activation in ~/.bashrc"
     return 0
   fi
 
-  # Disable auto-activation via conda config
-  log_info "Setting conda auto_activate_base to false..."
-  conda config --set auto_activate_base false 2>/dev/null || true
+  cp "$rc" "${rc}.bak"
 
-  # Comment out conda init block in .bashrc
-  if [ -f "${HOME}/.bashrc" ] && grep -q "# >>> conda initialize >>>" "${HOME}/.bashrc" 2>/dev/null; then
-    log_info "Commenting out conda init block in ~/.bashrc..."
+  # Collapse '# # # >>> conda' left by older runs of this script back to one comment.
+  sed -i '/conda initialize >>>/,/conda initialize <<</ s/^\(# \)\{2,\}/# /' "$rc"
 
-    # Create backup
-    cp "${HOME}/.bashrc" "${HOME}/.bashrc.bak"
+  # Comment the init block once. Already-commented lines stay as they are,
+  # so re-running does not stack another '# ' on every line.
+  sed -i '/# >>> conda initialize >>>/,/# <<< conda initialize <<</ { /^[[:space:]]*#/! s/^/# /; }' "$rc"
 
-    # Comment out the conda init block
-    sed -i.tmp '/# >>> conda initialize >>>/,/# <<< conda initialize <<</s/^/# /' "${HOME}/.bashrc"
-    rm -f "${HOME}/.bashrc.tmp"
-
-    log_success "conda init block commented out"
+  # Azure's activate line sits outside the init block.
+  if grep -qE '^[[:space:]]*conda[[:space:]]' "$rc"; then
+    sed -i -E 's/^[[:space:]]*conda[[:space:]].*/# arrive-aml: &/' "$rc"
+    log_success "Commented conda commands in ~/.bashrc (they ran on every login with conda off PATH)"
   else
-    log_info "No conda init block found in ~/.bashrc"
+    log_success "conda init in ~/.bashrc is already quiet"
+  fi
+}
+
+disable_conda() {
+  log_info "Disabling conda auto-activation..."
+
+  if command -v conda >/dev/null 2>&1; then
+    log_info "Setting conda auto_activate_base to false..."
+    conda config --set auto_activate_base false 2>/dev/null || true
+  else
+    log_info "conda is not on PATH - still checking ~/.bashrc for leftover activate lines"
   fi
 
-  log_success "conda auto-activation disabled!"
-  log_info "Note: conda is still installed and can be activated manually with: conda activate base"
-  log_info "Rationale: Azure ML may have dependencies on the base conda environment"
+  quiet_conda_bashrc
+
+  log_success "conda will not auto-activate in new shells"
+  log_info "The Anaconda install is unchanged. Activate it by hand when you need it: source /anaconda/etc/profile.d/conda.sh && conda activate azureml_py38"
 }
 
 # Run if executed directly (not sourced)

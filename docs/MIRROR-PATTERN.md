@@ -32,7 +32,7 @@ mounted on every compute instance you own.
   (serialized, logged to `~/.local/state/arrive-aml/sot-sync.log`). Same for `post-merge` and
   `post-rewrite` (amend/rebase use `--force-with-lease`).
 - **Push** to GitHub as always: `git push` (remote.pushDefault = origin, push.autoSetupRemote on).
-- **Restart**: `aml-bootstrap --restore` re-clones from GitHub (falls back to the SOT when offline),
+- **Restart**: the next login runs `aml-bootstrap --restore`, which re-clones from GitHub (falls back to the SOT when offline),
   adds the `sot` remote, fetches the branches that only the SOT has, and fast-forwards the default
   branch to whatever the SOT has. Then it rebuilds venvs.
 - **Verify**: `bash scripts/verify-setup.sh` flags commits that never reached the SOT.
@@ -87,7 +87,7 @@ Multiple branches side by side: `git worktree add /mnt/mirror/arrive-aml-feature
 
 | Symptom | Fix |
 |---------|-----|
-| `/mnt/mirror` missing after restart | `aml-bootstrap --restore` |
+| `/mnt/mirror` missing after restart | SSH in (login restores it), or `aml-bootstrap --restore` |
 | `verify-setup.sh`: "N commit(s) not yet in the SOT" | `cd /mnt/mirror/REPO && git push sot HEAD`; check `~/.local/state/arrive-aml/sot-sync.log` |
 | `! [rejected]` in the sync log | Another VM pushed that branch to the SOT: `git pull sot <branch>`, then commit again |
 | Mirror dir exists but git errors | `aml-bootstrap --restore` moves it to `<mirror>.broken-<timestamp>` and re-clones |
