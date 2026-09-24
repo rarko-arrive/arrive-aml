@@ -52,6 +52,8 @@ while IFS= read -r line; do
   f="${line%%:*}"
   rest="${line#*:*:}"
   [[ "$f" =~ $IDENTITY_OK ]] && continue
+  # temporary session-resume note in README.md (remove together with it)
+  [[ "$line" == *TEMP-RESUME* ]] && continue
   # strip allowed org mentions, then look for anything left
   if [[ "$f" =~ $ORG_OK ]]; then
     rest="${rest//rarko-arrive/}"

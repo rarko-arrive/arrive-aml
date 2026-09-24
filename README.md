@@ -100,3 +100,7 @@ Tests: `bash tests/lint.sh` and `bash tests/sandbox-new-user.sh`.
 
 ---
 Arrive Logistics Data Science · questions and fixes: open an issue or PR on this repo
+
+<!-- TEMP-RESUME: remove this section (and the TEMP-RESUME skip in tests/lint.sh) once the user-configurable-setup PRs are merged -->
+> **Temporary (maintainer):** resume the Claude Code session that built this change, on rarko2 only:
+> `cd /mnt/batch/tasks/shared/LS_root/mounts/clusters/rarko2/code/Users/rarko/main/arrive-aml && claude --resume f7398f4e-3a4e-469c-ae49-02b584002349` <!-- TEMP-RESUME -->
