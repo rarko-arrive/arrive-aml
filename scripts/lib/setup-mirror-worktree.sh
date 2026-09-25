@@ -8,7 +8,7 @@ set -euo pipefail
 #   bash scripts/lib/setup-mirror-worktree.sh REPO_NAME     # repo in the SOT base
 #   bash scripts/lib/setup-mirror-worktree.sh /path/to/sot  # explicit SOT path
 #   bash scripts/lib/setup-mirror-worktree.sh               # detect from cwd
-#   bash scripts/lib/setup-mirror-worktree.sh --list        # show worktrees of all SOT repos
+#   bash scripts/lib/setup-mirror-worktree.sh --list        # show mirrors of all SOT repos (+ unsynced commits)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/mirror.sh

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Install team Claude Code skills (idempotent)
-# Reads skills.conf (REPO_URL|NAME), clones/updates each skills repo on the OS
+# Reads skills.conf (REPO|NAME) plus ~/.config/arrive-aml/skills.conf, clones/updates each skills repo on the OS
 # disk and symlinks every skills/<skill> directory into ~/.claude/skills/ so the
 # skills are available as /<skill> in Claude Code on this VM.
 #
@@ -17,7 +17,8 @@ SKILLS_CONF="${ARRIVE_ROOT}/skills.conf"
 CLAUDE_SKILLS_DIR="${HOME}/.claude/skills"
 
 install_skills_repo() {
-  local url="$1" name="$2"
+  local url name="$2"
+  url="$(repo_url "$1")"
   local dest="${CLAUDE_SKILLS_CLONE_DIR}/${name}"
 
   if [ -d "$dest/.git" ]; then
@@ -31,7 +32,7 @@ install_skills_repo() {
     log_info "Cloning $name -> $dest"
     mkdir -p "$CLAUDE_SKILLS_CLONE_DIR"
     if ! git clone -q "$url" "$dest"; then
-      log_error "Failed to clone $url (is GitHub SSH working? run: bash scripts/lib/configure-github-ssh.sh)"
+      log_error "Failed to clone $url (no access, or GitHub auth not set up: bash scripts/lib/configure-github-ssh.sh)"
       return 1
     fi
     log_success "Cloned $name"
@@ -61,7 +62,7 @@ install_skills_repo() {
 }
 
 install_claude_skills() {
-  log_info "Installing Claude Code skills from skills.conf..."
+  log_info "Installing Claude Code skills from skills.conf (+ ${ARRIVE_EXTRA_SKILLS_FILE})..."
   mkdir -p "$CLAUDE_SKILLS_DIR"
 
   if [ ! -f "$SKILLS_CONF" ]; then
@@ -69,15 +70,11 @@ install_claude_skills() {
     return 0
   fi
 
-  local url name failed=0
-  while IFS='|' read -r url name _ || [ -n "$url" ]; do
-    url="$(trim "${url:-}")"
-    name="$(trim "${name:-}")"
-    [ -z "$url" ] && continue
-    [[ "$url" == \#* ]] && continue
-    [ -n "$name" ] || name="$(basename "$url" .git)"
-    install_skills_repo "$url" "$name" || failed=1
-  done < "$SKILLS_CONF"
+  _ARRIVE_PROTOCOL_CACHE="$(github_protocol)"
+  local spec name failed=0
+  while IFS='|' read -r spec name _; do
+    install_skills_repo "$spec" "$name" </dev/null || failed=1
+  done < <(read_skill_entries)
 
   echo
   log_info "Available skills: $(ls "$CLAUDE_SKILLS_DIR" 2>/dev/null | sed 's#^#/#' | tr '\n' ' ')"

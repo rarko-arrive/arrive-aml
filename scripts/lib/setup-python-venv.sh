@@ -24,8 +24,10 @@ setup_python_venv() {
 
   log_info "Python environment for: $REPO_NAME"
 
-  if [ ! -f "${REPO_ROOT}/pyproject.toml" ]; then
-    log_info "No pyproject.toml in $REPO_ROOT - skipping venv"
+  local kind
+  kind="$(repo_python_kind "$REPO_ROOT")"
+  if [ -z "$kind" ]; then
+    log_info "No [project] in pyproject.toml and no requirements.txt in $REPO_ROOT - skipping venv"
     return 0
   fi
 
@@ -40,8 +42,8 @@ setup_python_venv() {
   export UV_CACHE_DIR="$ARRIVE_UV_CACHE_DIR"
   export UV_PROJECT_ENVIRONMENT="$VENV_PATH"
 
+  local py=""
   if [ -f "${REPO_ROOT}/.python-version" ]; then
-    local py
     py="$(tr -d '[:space:]' < "${REPO_ROOT}/.python-version")"
     if [ -n "$py" ]; then
       log_info "Ensuring Python ${py} (from .python-version)..."
@@ -49,8 +51,14 @@ setup_python_venv() {
     fi
   fi
 
-  log_info "uv sync -> $VENV_PATH"
-  (cd "$REPO_ROOT" && uv sync)
+  if [ "$kind" = project ]; then
+    log_info "uv sync -> $VENV_PATH"
+    (cd "$REPO_ROOT" && uv sync)
+  else
+    log_info "requirements.txt -> $VENV_PATH (uv venv + uv pip install)"
+    [ -x "$VENV_PATH/bin/python" ] || uv venv -q ${py:+--python "$py"} "$VENV_PATH"
+    (cd "$REPO_ROOT" && uv pip install -q --python "$VENV_PATH/bin/python" -r requirements.txt)
+  fi
 
   # .venv symlink in the project (gitignored), replacing any real venv on the mount
   if [ -L "$VENV_LINK" ]; then

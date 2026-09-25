@@ -10,47 +10,15 @@ Cursor’s marketplace often lags VS Code on the **Python** extension. Older bui
 
 When Python fails, Jupyter has no kernel UI. VS Code works with Python **2026.4.0**.
 
-**Fix:** use Python **2026.4.0+** in Cursor (same major as your working VS Code install). This machine was updated to `ms-python.python@2026.4.0` via VSIX. Then:
+**Fix:** use Python **2026.4.0+** in Cursor (same major as your working VS Code install). (install the VSIX by hand if the marketplace lags). Then:
 
 1. `Cmd+Shift+P` → **Developer: Reload Window**
-2. Open `notebooks/DEMO.ipynb` → **Select Kernel** → **Python Environments** → `.venv`
+2. Open any notebook in the mirror → **Select Kernel** → **Python Environments** → `.venv`
 3. **Output → Jupyter** should no longer show the activation error
 
 Keep **Python**, **Python Environments**, and **Jupyter** enabled.
 
-## Mac bootstrap details
-
-`scripts/bootstrap-mac.sh` will:
-
-1. Install Homebrew if missing and hint Apple Silicon `PATH` (`/opt/homebrew`)
-2. `brew install git gh uv`
-3. Set safe git defaults
-4. Prompt for `user.name` / `user.email` only if unset
-5. Run `gh auth login` when not already authenticated
-6. Verify `gh api orgs/Arrive-Logistics`
-
-### Optional: SSH
-
-```bash
-bash scripts/github-ssh.sh
-```
-
 ## Common issues
-
-**`brew: command not found` after install**
-
-```bash
-eval "$(/opt/homebrew/bin/brew shellenv)"
-echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-```
-
-**`gh api orgs/Arrive-Logistics` fails**
-
-Accept the org invite / authorize SSO, then:
-
-```bash
-gh auth refresh -h github.com -s read:org
-```
 
 **`uv sync` / Python version**
 
@@ -83,13 +51,13 @@ Most DS work happens on an Azure ML **compute instances**. Cursor connects with 
 ### B. One-time SSH setup on your Mac
 
 ```bash
-cd /path/to/ds-cursor-demo
+cd /path/to/arrive-aml      # your laptop clone
 bash scripts/setup-azureml-ssh.sh
 ```
 
 The script will ask for alias / IP / port / PEM path, then:
 
-- copy the key to `~/.ssh/<name>.pem` (`chmod 400`; default = downloaded filename, e.g. `rarko.pem` — not necessarily the same Host alias)
+- copy the key to `~/.ssh/<name>.pem` (`chmod 400`; default = downloaded filename, e.g. `my-aml-vm.pem` — not necessarily the same Host alias)
 - mirror the same key under gitignored `.ssh/<name>.pem` in this repo
 - add a `Host` block to **`~/.ssh/config`** (what Cursor reads)
 - write a gitignored copy at `.ssh/config` in this repo
@@ -101,7 +69,7 @@ Prefer editing [`.ssh/config.example`](../.ssh/config.example) by hand? Copy to 
 
 Plain `ssh YOUR-CI-ALIAS` can work while **Cursor** still fails. Cursor’s Remote SSH (`anysphere.remote-ssh`) installs a remote server over a SOCKS tunnel; that path is flaky on Azure ML after Cursor updates, even when VS Code Remote SSH works on the same host.
 
-Merge [`.cursor/remote-ssh.settings.example.json`](../.cursor/remote-ssh.settings.example.json) into **Cursor User settings** (`Cmd+,` → open the JSON). Replace `YOUR-CI-ALIAS` with your Host alias (e.g. `rarko1`):
+Merge these into **Cursor User settings** (`Cmd+,` → open the JSON). Replace `YOUR-CI-ALIAS` with your Host alias (e.g. `my-aml-vm`):
 
 ```json
 {
@@ -127,11 +95,11 @@ Merge [`.cursor/remote-ssh.settings.example.json`](../.cursor/remote-ssh.setting
 
 These are **User** settings (local Mac), not repo-committed secrets. Re-apply after switching machines.
 
-**Do not** pick `github.com` in **Remote-SSH: Connect to Host…** — that Host is only for `git` over SSH. Use your Azure ML alias (e.g. `rarko1`).
+**Do not** pick `github.com` in **Remote-SSH: Connect to Host…** — that Host is only for `git` over SSH. Use your Azure ML alias (e.g. `my-aml-vm`).
 
 ### D. Test the connection
 
-Replace `YOUR-CI-ALIAS` with your Host alias (e.g. `rarko1`).
+Replace `YOUR-CI-ALIAS` with your Host alias (e.g. `my-aml-vm`).
 
 **1. Terminal** — proves host / key / IP still work:
 
@@ -163,7 +131,7 @@ ssh YOUR-CI-ALIAS 'rm -rf ~/.cursor-server ~/.cursor-remote'
 ### F. On the VM (first time)
 
 ```bash
-cd /path/to/ds-cursor-demo   # cloudfiles copy or clone with gh
+cd /mnt/mirror/arrive-aml   # or any mirrored repo; aml-bootstrap already does this for every repo
 bash scripts/bootstrap-azureml.sh
 ```
 
@@ -174,7 +142,7 @@ bash scripts/bootstrap-azureml.sh
    (`cloudfiles` / Azure Files mounts are slow; `/mnt` is wiped on stop/start - `aml-bootstrap --restore` recreates it)
 3. `uv sync` into that path
 4. Symlink repo `.venv` → the local-disk env (so Cursor’s kernel picker matches the Mac happy path)
-5. Smoke-test with `uv run hello`
+5. Smoke-test with `uv run python -c 'import pandas, polars'`
 
 After that, select **Python Environments → `.venv`** the same way as on Mac. Later `uv sync` / `uv run` follow the `.venv` symlink without setting `UV_PROJECT_ENVIRONMENT` again.
 
@@ -198,5 +166,8 @@ After that, select **Python Environments → `.venv`** the same way as on Mac. L
 | `uv: command not found` | Open a new shell, or `source ~/.bashrc` (bootstrap adds `~/.local/bin`). |
 | No `.venv` / wrong kernel path | Re-run `bash scripts/bootstrap-azureml.sh`. Kernel path should end with `.venv/bin/python`. |
 | Slow `uv sync` / packages on cloudfiles | Env should live under `/mnt/uv-venvs/…` (`.venv` is a symlink), not inside the repo mount. Re-run `aml-bootstrap`. |
+| Wizard picked the wrong folder / name | `aml-bootstrap --configure` to review your answers, or edit `~/.config/arrive-aml/env` (`ARRIVE_USER_NAME`, `ARRIVE_USER_EMAIL`, `ARRIVE_SOT_BASE`) and re-run `aml-bootstrap`. |
+| verify: `git user.name/user.email not set` | Setup ran without a terminal (startup script, `--yes`, login restore) and could not detect you. `aml-bootstrap --configure`. |
+| Clone of a team repo failed (no access / "Repository not found") | You are not in the team GitHub org yet: ask a teammate to add you, then check `gh auth status` and re-run `aml-bootstrap`. |
 
 Never commit `.ssh/config` or `*.pem` — only `.ssh/config.example` is tracked.

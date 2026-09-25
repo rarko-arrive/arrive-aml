@@ -2,10 +2,12 @@
 
 ## The Problem
 
-Azure ML compute instances mount your files from Azure Files (CIFS) at `~/cloudfiles/code/Users/<you>/`.
+Azure ML compute instances mount your files from Azure Files (CIFS) at `~/cloudfiles/code/Users/<you>/`
+(`<you>` = your folder under `Users/` in Azure ML Studio -> Notebooks; the share holds every workspace
+user's folder, so use your own).
 Every file operation on that share costs 60-95 ms, so git is painfully slow there:
 
-| Where | `git status` (arrive-aml, measured 2026-09-14) |
+| Where | `git status` (arrive-aml, measured on a compute instance, 2026-09-14) |
 |-------|--------------------------------------------------|
 | SOT on cloudfiles | 5.4 s |
 | `git worktree` on /mnt linked to the SOT's `.git` | 3.0 s (index, HEAD and refs still live on the share) |
@@ -59,9 +61,9 @@ replaced; ones with uncommitted changes are moved to `<mirror>.old-worktree-<tim
 ## Manual equivalent (what the scripts do)
 
 ```bash
-SOT=~/cloudfiles/code/Users/rarko/main/arrive-aml
+SOT=~/cloudfiles/code/Users/<you>/main/arrive-aml
 git -C "$SOT" config receive.denyCurrentBranch updateInstead   # SOT may receive pushes to its checked-out branch
-git clone -b main git@github.com:rarko-arrive/arrive-aml.git /mnt/mirror/arrive-aml
+git clone -b main git@github.com:<team-org>/arrive-aml.git /mnt/mirror/arrive-aml   # or https://github.com/<team-org>/arrive-aml.git
 cd /mnt/mirror/arrive-aml
 git remote add sot "$SOT"
 git fetch sot                                            # branches never pushed to GitHub

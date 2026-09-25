@@ -33,27 +33,38 @@ So a `/mnt` wipe can only ever cost you *uncommitted* edits. Commit often.
 Open a terminal on the VM (Azure ML studio terminal, or SSH).
 
 ```bash
-bash ~/cloudfiles/code/Users/rarko/main/arrive-aml/scripts/bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/<team-org>/arrive-aml/main/scripts/get-started.sh | bash
 source ~/.bashrc
 claude auth login            # once per VM; open the URL on your laptop, paste the code back
 ```
 
-Replace `rarko` with your folder under `~/cloudfiles/code/Users/`. arrive-aml is already there
-because the share is common to all your VMs. If it truly is not:
+`<you>` below is your folder under `~/cloudfiles/code/Users/` (the `Users/` folder in Azure ML
+Studio → Notebooks). That folder lists **every** workspace user, so use your own. The command
+guesses it from the instance name (instance `ctracy2` → folder `ctracy`) and asks you to confirm
+(`ARRIVE_AML_USER=<you>` skips that), clones arrive-aml there and runs the bootstrap.
+Walkthrough: [GETTING-STARTED.md](GETTING-STARTED.md).
+
+On a second VM arrive-aml is already on your share, because the share is common to all your VMs:
 
 ```bash
-mkdir -p ~/cloudfiles/code/Users/<you>/main && cd ~/cloudfiles/code/Users/<you>/main
-gh auth login                # pick SSH; gh is pre-installed on Azure ML images
-git clone git@github.com:rarko-arrive/arrive-aml.git
+bash ~/cloudfiles/code/Users/<you>/main/arrive-aml/scripts/bootstrap.sh
 ```
+
+The bootstrap starts with a short wizard that asks only what it cannot detect: full name and work
+email (suggested `<you>@arrivelogistics.com`), then `Look right? [Y/n]` (`n` also lets you change
+the team org and add extra repos). It remembers the answers in `~/.config/arrive-aml/env` and in
+`~/cloudfiles/code/Users/<you>/main/.arrive-aml/profile`, so your next VM asks nothing. Review or
+change them any time: `aml-bootstrap --configure`. Skip questions: `--name "First Last"`,
+`--email you@...`, `--github-org ORG`, or `--yes` (never asks).
 
 What `bootstrap.sh` does, in order, and where it lands:
 
 | Step | What | Persists? |
 |---|---|---|
+| 0 you | name, email, GitHub user; git identity from your answers | yes (env file + share profile) |
 | 1 tools | git tuned for the share, uv, gh, GitHub SSH key (uploaded via gh), Docker, cloudflared, Claude Code | yes (OS disk) |
 | 2 shell | `aml-bootstrap` command, `~/.config/arrive-aml/env`, one managed block in `~/.bashrc` | yes |
-| 3 repos | every repo in `repos.conf`: SOT clone → mirror clone → `uv sync` venv + `.venv` symlink | SOT yes; mirror + venv **no** |
+| 3 repos | every repo in `repos.conf` + `~/.config/arrive-aml/repos.conf`: SOT clone → mirror clone → `uv sync` venv + `.venv` symlink | SOT yes; mirror + venv **no** |
 | 4 skills | every repo in `skills.conf` → `~/.claude/skills/<skill>` (e.g. `/work-in-repo`) | yes |
 | 5 verify | `verify-setup.sh`: every failed check prints its exact fix | |
 
@@ -69,6 +80,10 @@ You should end with:
 
 Anything else: read the `fix:` line under the failed check, run it, re-run `aml-bootstrap`.
 
+**GitHub login:** if `gh` is not logged in, step 1 runs `gh auth login --web` and prints a
+one-time code; open https://github.com/login/device on your laptop and enter it. The VM's SSH key
+is then uploaded for you, and `gh auth setup-git` makes https clones work too.
+
 **Laptop side (once per VM):** `bash scripts/setup-azureml-ssh.sh` from your local clone adds
 the VM to `~/.ssh/config`. Then Cursor / VS Code → Remote-SSH → the VM → open
 `/mnt/mirror/<repo>`. The editors are not installed on the VM; they bring their own server.
@@ -80,7 +95,7 @@ the VM to `~/.ssh/config`. Then Cursor / VS Code → Remote-SSH → the VM → o
 `/mnt` comes back empty. **Just SSH in.** The first interactive shell sees that the mirrors are
 gone, fast-forwards `arrive-aml` itself when that checkout is clean, then re-clones every mirror
 (GitHub first, SOT if offline), fetches the branches that exist only in the SOT, rebuilds the
-venvs, refreshes skills and verifies. A second terminal opened while that is running waits, then
+venvs (your personal repos included), refreshes skills and verifies. A second terminal opened while that is running waits, then
 gets the same `✓ Ready` line. You do not type a restore command.
 
 ```bash
@@ -96,7 +111,8 @@ sudo -u azureuser -H bash /home/azureuser/cloudfiles/code/Users/<you>/main/arriv
 ```
 
 and the restore runs on every start, so the login shell finds the mirrors and stays quiet.
-(`crontab` is not permitted for `azureuser`.)
+(`crontab` is not permitted for `azureuser`.) Startup scripts and the login restore never ask
+questions; they use your saved answers.
 
 ---
 
@@ -152,9 +168,11 @@ reports commits that never reached the SOT (`git push sot HEAD` retries).
 
 | Want | Do |
 |---|---|
-| A new team repo on every VM | add `git@github.com:rarko-arrive/NAME.git\|NAME\|yes` to `repos.conf`, run `aml-bootstrap` |
+| A new team repo on every VM | add `{org}/NAME\|NAME\|yes` to `repos.conf` (PR), run `aml-bootstrap` |
+| A repo just for you | `bash scripts/setup-repos.sh --add owner/name` (records it in `~/.config/arrive-aml/repos.conf`) |
 | A repo without a mirror | same line with `\|no` |
-| A new Claude Code skills repo | add `REPO_URL\|NAME` to `skills.conf`, run `bash scripts/lib/install-claude-skills.sh` |
+| A new Claude Code skills repo | team: add `{org}/NAME\|NAME` to `skills.conf`; just you: `~/.config/arrive-aml/skills.conf`. Then `bash scripts/lib/install-claude-skills.sh` |
+| Change your name / email / team org | `aml-bootstrap --configure` |
 | venvs somewhere else | edit `UV_VENV_ROOT` in `~/.config/arrive-aml/env`, run `aml-bootstrap --restore` |
 | Only one piece | every script in `scripts/lib/` runs standalone, e.g. `bash scripts/lib/setup-python-venv.sh /mnt/mirror/arrive-ds` |
 
@@ -168,6 +186,10 @@ reports commits that never reached the SOT (`git push sot HEAD` retries).
 | `/mnt/mirror` missing | VM restarted, and this shell did not restore it | `aml-bootstrap --restore` (or open a new login; it runs on its own) |
 | `FAIL ... -> sot` in the sync log | share unmounted, or another VM pushed first | `git push sot HEAD`, or `git pull sot <branch>` then commit |
 | `Permission denied (publickey)` | key not on GitHub / gh not logged in | `gh auth login` then `bash scripts/lib/configure-github-ssh.sh` |
+| clone of a team repo fails / "Repository not found" | not in the team GitHub org yet | ask a teammate to add you; check `gh auth status`; re-run `aml-bootstrap` |
+| verify: `git user.name/user.email not set` | identity never entered (non-interactive run) | `aml-bootstrap --configure` |
+| wizard picked the wrong folder / name | wrong guess accepted | `aml-bootstrap --configure`, or edit `~/.config/arrive-aml/env` |
+| verify note: origin points at another org | team org changed (see [ORG-MOVE.md](ORG-MOVE.md)) | fine while GitHub redirects; the note prints the `git remote set-url` to switch |
 | `detected dubious ownership` | share is root-owned | `bash scripts/lib/configure-git.sh` (sets `safe.directory *`) |
 | git does not see my edits | old `core.ignoreStat=true` flagged files assume-unchanged | `aml-bootstrap` (clears it), or `git ls-files -z \| git update-index -z --no-assume-unchanged --stdin` |
 | `uv sync` fails: "Unable to determine which files to ship" | repo is not a package but declares a build backend | add `[tool.uv] package = false` to `pyproject.toml` |
@@ -183,7 +205,7 @@ reports commits that never reached the SOT (`git push sot HEAD` retries).
 ## Appendix A - Why it is built this way (2026-09-14 findings)
 
 The previous setup looped: `setup-vm.sh --all` → `verify-setup.sh` failed → "run setup again".
-Investigation on `rarko1` found:
+Investigation on the first VM found:
 
 1. **GitHub SSH check was a false negative.** GitHub exits 1 on `ssh -T` even when authenticated;
    `ssh | grep -q` under `set -o pipefail` reported failure. Fixed with `github_ssh_ok` in `common.sh`.
@@ -195,7 +217,7 @@ Investigation on `rarko1` found:
 4. **`core.ignoreStat true` in the git tuning hid edits from git.** 56 files were flagged
    assume-unchanged; `git status` showed a clean tree over real changes. Now forced `false`,
    flags cleared automatically.
-5. **`setup-repos.sh` pointed at `~/cloudfiles/rarko/main`**, a path that does not exist. The SOT
+5. **`setup-repos.sh` pointed at `~/cloudfiles/<you>/main`**, a path that does not exist. The SOT
    base is now derived from arrive-aml's own `.git` location.
 6. **`/mnt` is Azure's ephemeral resource disk** (`/mnt/EPHEMERAL_DISK_DATALOSS_WARNING.txt`),
    not persistent as documented. Hence `--restore`, the bashrc reminder and the startup-script option.
@@ -218,15 +240,23 @@ Investigation on `rarko1` found:
 - The SOT is only ever written by `git push` (hooks); `receive.denyCurrentBranch=updateInstead`
   refreshes its files when its checked-out branch is pushed. Nothing runs `git worktree prune` in a SOT.
 - Verification never says "run setup again" without naming the failing check and its fix.
+- `~/.config/arrive-aml/env` (per VM) holds `ARRIVE_USER_NAME`, `ARRIVE_USER_EMAIL`,
+  `ARRIVE_GITHUB_USER`, `ARRIVE_GITHUB_ORG` (only when not the team default), `ARRIVE_SOT_BASE`,
+  `MIRROR_BASE`, `UV_VENV_ROOT`, `ARRIVE_UV_CACHE_DIR`, `CLAUDE_SKILLS_CLONE_DIR`,
+  `ARRIVE_GIT_PROTOCOL`, `ARRIVE_NO_AUTO_RESTORE`, `ARRIVE_NO_SELF_UPDATE`. Re-runs merge keys into
+  it and keep your edits; they never overwrite the file.
 - All paths are configurable in `~/.config/arrive-aml/env`; nothing assumes the Linux user is
-  the Azure ML user (`azureuser` vs `rarko`).
+  the Azure ML user (`azureuser` vs your AML folder name), and no name, email or VM is hard-coded:
+  git identity comes from your wizard answers (`ARRIVE_USER_NAME` / `ARRIVE_USER_EMAIL`).
 - Logs: `~/.local/state/arrive-aml/bootstrap-<time>.log`, `~/.local/state/arrive-aml/sot-sync.log`.
 
 ## Appendix C - Files that matter
 
 | File | Role |
 |---|---|
-| `scripts/bootstrap.sh` | the one command (`--restore`, `--dry-run`, `--skip-*`) |
+| `scripts/get-started.sh` | first command on a new VM: clones arrive-aml to your share, runs bootstrap |
+| `scripts/bootstrap.sh` | the one command (`--restore`, `--configure`, `--yes`, `--dry-run`, `--skip-*`) |
+| `scripts/lib/configure-user.sh` | the wizard: name, email, org; saves env file + share profile |
 | `scripts/setup-repos.sh` | repos.conf → SOT clone, mirror clone, venv |
 | `scripts/verify-setup.sh` | required vs optional checks, prints fixes |
 | `scripts/lib/mirror.sh` | mirror clone, `sot` remote, sync hooks, legacy migration |
@@ -235,5 +265,5 @@ Investigation on `rarko1` found:
 | `scripts/lib/login-restore.sh` | sourced by bashrc: restores `/mnt` after a restart |
 | `scripts/lib/setup-python-venv.sh` | `uv sync` into `/mnt/uv-venvs/<repo>` + `.venv` symlink |
 | `scripts/lib/install-claude-skills.sh` | skills.conf → `~/.claude/skills` |
-| `repos.conf`, `skills.conf` | what gets installed on every VM |
+| `repos.conf`, `skills.conf` | what gets installed on every VM (yours: `~/.config/arrive-aml/repos.conf`, `skills.conf`) |
 | `docs/MIRROR-PATTERN.md` | the SOT/mirror design with measurements |

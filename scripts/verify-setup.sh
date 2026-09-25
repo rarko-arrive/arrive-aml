@@ -68,10 +68,15 @@ main() {
   else
     fail "safe.directory '*' missing (git refuses root-owned cloudfiles repos)" "bash scripts/lib/configure-git.sh"
   fi
-  if [ -n "$(git config --global user.email 2>/dev/null)" ]; then
-    log_success "user: $(git config --global user.name) <$(git config --global user.email)>"
+  local git_name git_email
+  git_name="$(git config --global user.name 2>/dev/null || true)"
+  git_email="$(git config --global user.email 2>/dev/null || true)"
+  if [ -z "$git_name" ] || [ -z "$git_email" ]; then
+    fail "git user.name/user.email not set (commits would have no author)" "aml-bootstrap --configure"
+  elif [ -n "${ARRIVE_USER_EMAIL:-}" ] && { [ "$git_email" != "$ARRIVE_USER_EMAIL" ] || [ "$git_name" != "${ARRIVE_USER_NAME:-$git_name}" ]; }; then
+    note "git commits as $git_name <$git_email>, arrive-aml config says ${ARRIVE_USER_NAME:-?} <$ARRIVE_USER_EMAIL> (aml-bootstrap applies the config)"
   else
-    fail "git user.email not set" "git config --global user.email you@arrivelogistics.com"
+    log_success "user: $git_name <$git_email>"
   fi
   echo
 
@@ -172,11 +177,9 @@ main() {
     fail "$MIRROR_BASE missing (VM restarted? /mnt is wiped on stop/start; a new login restores it)" "aml-bootstrap --restore"
   fi
   if [ -n "$sot_base" ] && [ -f "${ARRIVE_ROOT}/repos.conf" ]; then
-    local url name mirror sot mir
-    while IFS='|' read -r url name mirror || [ -n "${url:-}" ]; do
-      url="$(trim "${url:-}")"; [ -z "$url" ] && continue; [[ "$url" == \#* ]] && continue
-      name="$(trim "${name:-}")"; [ -n "$name" ] || name="$(basename "$url" .git)"
-      mirror="$(trim "${mirror:-yes}")"
+    local spec name mirror sot mir origin
+    while IFS='|' read -r spec name mirror; do
+      mirror="${mirror:-yes}"
       sot="${sot_base}/${name}"; mir="${MIRROR_BASE}/${name}"
       if [ ! -d "$sot/.git" ]; then
         fail "$name: not cloned to SOT" "bash scripts/setup-repos.sh --only $name"
@@ -193,7 +196,7 @@ main() {
         if [ ! -x "$mir/.git/hooks/arrive-aml-sync-sot" ]; then
           fail "$name: SOT sync hooks missing" "bash scripts/lib/setup-mirror-worktree.sh $name"
         fi
-        if [ -f "$mir/pyproject.toml" ]; then
+        if [ -n "$(repo_python_kind "$mir")" ]; then
           if [ -x "$mir/.venv/bin/python" ]; then
             venv_msg=", venv ok"
           else
@@ -202,6 +205,15 @@ main() {
           fi
         fi
         log_success "$name: mirror $mir [$branch]$venv_msg"
+        # Team repos: warn when origin still points at another org (e.g. after an org move)
+        if [[ "$spec" == \{org\}/* ]]; then
+          origin="$(git -C "$mir" remote get-url origin 2>/dev/null || true)"
+          case "$origin" in
+            *github.com[:/]"${ARRIVE_GITHUB_ORG}"/*) ;;
+            "") ;;
+            *) note "$name: origin is $origin, team org is ${ARRIVE_GITHUB_ORG} (fine while GitHub redirects; to switch: git -C $mir remote set-url origin $(repo_url "$spec"))" ;;
+          esac
+        fi
       else
         if [ -f "$mir/.git" ]; then
           fail "$name: legacy worktree mirror at $mir (slow, shared registrations)" "aml-bootstrap --restore   (converts it to a local clone)"
@@ -209,7 +221,7 @@ main() {
           fail "$name: mirror missing or broken at $mir" "aml-bootstrap --restore   (or: bash scripts/setup-repos.sh --only $name)"
         fi
       fi
-    done < "${ARRIVE_ROOT}/repos.conf"
+    done < <(read_repo_entries)
   fi
   echo
 
